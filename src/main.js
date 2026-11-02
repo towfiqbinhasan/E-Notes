@@ -20,10 +20,9 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(
 async function boot() {
   let localMode = false;
   try { localMode = localStorage.getItem(LOCAL_FLAG) === '1'; } catch { /* ignore */ }
-  if (localMode || !isConfigured) {
-    if (localMode) return startApp(LOCAL_USER, { localMode: true });
-    return showLogin();
-  }
+  // Without a sync server (no Supabase keys in this build) there is nothing to sign in to:
+  // open the notebooks straight away, saved on this device.
+  if (localMode || !isConfigured) return startApp(LOCAL_USER, { localMode: true });
 
   const res = await withTimeout(supabase.auth.getSession(), 5000);
   const session = res && res.data ? res.data.session : null;

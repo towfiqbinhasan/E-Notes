@@ -7,6 +7,7 @@ import { importPdf } from './pdf.js';
 import { exportSheets, safeFileName } from './export.js';
 import { desktop, isElectron, isNative, saveFile, applyNativeTheme, onBackButton } from './platform.js';
 import { initClaudePanel } from './ai.js';
+import { isConfigured } from './supabase.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -143,6 +144,8 @@ export function initUI(opts) {
   for (const b of document.querySelectorAll('.tool')) b.innerHTML = ICONS[b.dataset.tool];
   $('account-email').textContent = localMode ? 'This device only (no account)' : user.email || '';
   $('btn-signout').textContent = localMode ? 'Sign in' : 'Sign out';
+  // A build without sync has no account to sign in to.
+  $('btn-signout').hidden = localMode && !isConfigured;
   applyTheme();
 
   // ================= sidebar & notebooks =================
@@ -808,6 +811,11 @@ export function initUI(opts) {
     } else if (id) {
       const next = store.listNotebooks()[0];
       openNotebook(next ? next.id : null);
+    } else if (store.listNotebooks().length) {
+      // First sync on a new device: open the notebook that just arrived.
+      const last = prefs.lastNotebook[user.id];
+      const pick = (last && store.getNotebook(last) && !store.getNotebook(last).deleted_at) ? last : store.listNotebooks()[0].id;
+      openNotebook(pick);
     }
   });
   store.events.addEventListener('sheets', (e) => {
