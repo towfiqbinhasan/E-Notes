@@ -389,3 +389,9 @@ stored in the `strokes` array as items with `"t": "text"`.
 - **Changing app icons:** replace the PNGs in `public/icons/`, `build/icon.png`
   and `android/app/src/main/res/mipmap-*`, or edit and rerun
   `npm run icons`.
+
+---
+
+## Credits
+
+E-Notes is created and maintained by **Md. Towfiq Bin Hasan** and **TH team**.
