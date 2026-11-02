@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#171a23" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="E-Notes: handwrite notes next to your PDFs. Syncs live across Windows, Linux, Android and the web. Created by Md. Towfiq Bin Hasan and TH team." />
+    <meta name="author" content="Md. Towfiq Bin Hasan and TH team" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*;" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <title>E-Notes</title>
+  </head>
+  <body>
+    <!-- Splash while the session loads -->
+    <div id="splash" class="splash"><div class="spinner"></div></div>
+
+    <!-- Login -->
+    <section id="login" class="login" hidden>
+      <form id="login-form" class="login-card" autocomplete="on">
+        <img src="./icons/icon-192.png" alt="" class="login-logo" width="64" height="64" />
+        <h1>E-Notes</h1>
+        <p class="muted">Write by hand next to your PDFs.<br />Live on every device, even offline.</p>
+        <div id="login-config-warning" class="notice" hidden>
+          Supabase is not configured yet. Copy <code>.env.example</code> to <code>.env</code>, fill in your keys and restart.
+          You can still use E-Notes on this device only.
+        </div>
+        <div id="login-fields">
+          <label>Email <input id="login-email" type="email" autocomplete="email" required /></label>
+          <label>Password <input id="login-password" type="password" autocomplete="current-password" minlength="6" required /></label>
+          <div class="row">
+            <button type="submit" class="btn primary" id="btn-signin">Sign in</button>
+            <button type="button" class="btn" id="btn-signup">Create account</button>
+          </div>
+          <div class="divider"><span>or</span></div>
+          <button type="button" class="btn google" id="btn-google">
+            <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+            Sign in with Google
+          </button>
+        </div>
+        <p id="login-message" class="login-message" role="status"></p>
+        <button type="button" class="link" id="btn-local">Use without an account (this device only)</button>
+        <p class="credit">Created by <b>Md. Towfiq Bin Hasan</b> and <b>TH team</b></p>
+      </form>
+    </section>
+
+    <!-- App -->
+    <div id="app" class="app" hidden>
+      <aside id="sidebar" class="sidebar" aria-label="Notebooks">
+        <div class="sidebar-head">
+          <img src="./icons/icon-192.png" alt="" width="28" height="28" />
+          <strong>E-Notes</strong>
+          <button class="icon-btn only-narrow" id="btn-close-sidebar" title="Close">✕</button>
+        </div>
+        <div class="search">
+          <input id="search" type="search" placeholder="Search notebooks and text…" autocomplete="off" />
+        </div>
+        <div id="search-results" class="search-results" hidden></div>
+        <nav id="notebook-list" class="notebook-list"></nav>
+        <button class="btn primary new-notebook" id="btn-new-notebook">+ New notebook</button>
+        <div class="sidebar-foot">
+          <div class="account">
+            <span id="account-email" class="muted ellipsis"></span>
+          </div>
+          <div class="row">
+            <button class="btn small" id="btn-settings">Settings</button>
+            <button class="btn small" id="btn-signout">Sign out</button>
+          </div>
+        </div>
+      </aside>
+      <div id="scrim" class="scrim"></div>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-row">
+            <button class="icon-btn" id="btn-menu" title="Notebooks (Ctrl+B)"></button>
+            <input id="nb-title" class="nb-title" value="" spellcheck="false" aria-label="Notebook title" />
+            <span id="sync-status" class="sync-status" title="Sync status"><i></i><span></span></span>
+            <button class="icon-btn" id="btn-add-pdf" title="Add PDF (Ctrl+O)"></button>
+            <button class="icon-btn" id="btn-add-sheet" title="Add blank sheet"></button>
+            <button class="icon-btn" id="btn-export" title="Export PDF (Ctrl+E)"></button>
+            <button class="icon-btn ai-btn" id="btn-ai" title="Ask Claude about this sheet"></button>
+            <button class="icon-btn" id="btn-theme" title="Light / dark"></button>
+          </div>
+          <div class="toolbar" id="toolbar" role="toolbar" aria-label="Drawing tools">
+            <div class="tool-group">
+              <button class="tool" data-tool="pen" title="Pen (P)"></button>
+              <button class="tool" data-tool="highlighter" title="Highlighter (H)"></button>
+              <button class="tool" data-tool="eraser" title="Eraser (E) — or hold the S Pen button"></button>
+              <button class="tool" data-tool="lasso" title="Lasso select (L)"></button>
+              <button class="tool" data-tool="text" title="Text box (T)"></button>
+              <button class="tool" data-tool="laser" title="Laser pointer (K)"></button>
+              <button class="tool" data-tool="hand" title="Hand / scroll (hold Space)"></button>
+            </div>
+            <div class="tool-group presets" id="presets"></div>
+            <button class="icon-btn" id="btn-cursor" title="Cursor style"></button>
+            <div class="tool-group">
+              <button class="icon-btn" id="btn-undo" title="Undo (Ctrl+Z)"></button>
+              <button class="icon-btn" id="btn-redo" title="Redo (Ctrl+Y)"></button>
+            </div>
+            <div class="tool-group zoom">
+              <button class="icon-btn" id="btn-zoom-out" title="Zoom out (Ctrl -)">−</button>
+              <button class="zoom-label" id="zoom-label" title="Fit width (Ctrl 0)">100%</button>
+              <button class="icon-btn" id="btn-zoom-in" title="Zoom in (Ctrl +)">+</button>
+            </div>
+          </div>
+        </header>
+
+        <div id="viewport" class="viewport">
+          <div id="sheets" class="sheets"></div>
+          <div id="empty" class="empty" hidden>
+            <div class="empty-card">
+              <h2 id="empty-title">Drop PDFs here</h2>
+              <p class="muted" id="empty-text">Each PDF page becomes a sheet with room for notes beside it.</p>
+              <div class="row center">
+                <button class="btn primary" id="empty-add-pdf">Add PDF</button>
+                <button class="btn" id="empty-add-sheet">Blank sheet</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <button id="page-pill" class="page-pill" title="Go to sheet" hidden></button>
+        <div id="drop-overlay" class="drop-overlay" hidden><div>Drop PDF files to add them</div></div>
+
+        <!-- Ask Claude -->
+        <aside id="ai-panel" class="ai-panel" hidden aria-label="Ask Claude">
+          <div class="ai-head">
+            <strong>Ask Claude</strong>
+            <span id="ai-sheet" class="muted small"></span>
+            <button class="icon-btn" id="ai-close" title="Close">✕</button>
+          </div>
+          <div class="ai-actions">
+            <button class="btn small" data-ai="transcribe">Handwriting → text</button>
+            <button class="btn small" data-ai="summarize">Summarize</button>
+            <button class="btn small" data-ai="explain">Explain page</button>
+            <button class="btn small" data-ai="quiz">Quiz me</button>
+          </div>
+          <div id="ai-log" class="ai-log">
+            <p class="muted small">Claude reads the sheet in the middle of the screen. Ask anything about it, in English or বাংলা.</p>
+          </div>
+          <form id="ai-form" class="ai-form">
+            <textarea id="ai-input" rows="2" placeholder="Ask about this sheet…"></textarea>
+            <button class="btn primary" type="submit">Send</button>
+          </form>
+          <p id="ai-foot" class="muted small ai-foot"></p>
+        </aside>
+      </main>
+    </div>
+
+    <!-- Settings -->
+    <dialog id="settings-dialog" class="dialog">
+      <form method="dialog">
+        <h2>Settings</h2>
+        <fieldset>
+          <legend>New PDF sheets</legend>
+          <label class="row between">Note margin side
+            <select id="set-margin-side">
+              <option value="right">Right of the page</option>
+              <option value="left">Left of the page</option>
+            </select>
+          </label>
+          <label class="row between">Margin width <span><input type="range" id="set-margin-width" min="0.15" max="0.6" step="0.05" /> <b id="set-margin-width-label"></b></span></label>
+          <p class="muted small">Applies to PDFs you add from now on. Use the ⋯ button on a sheet to change one sheet.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Input</legend>
+          <label class="row between">Draw with finger <input type="checkbox" id="set-finger" /></label>
+          <p class="muted small">Off = palm rejection: pen and mouse draw, fingers scroll and zoom.</p>
+          <label class="row between">Cursor
+            <select id="set-cursor"></select>
+          </label>
+          <label class="row between">Hold pen still to make a shape <input type="checkbox" id="set-shapes" /></label>
+          <p class="muted small">Draw a line, circle, rectangle or triangle and keep the pen still for a moment.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Paper</legend>
+          <label class="row between">New blank sheets
+            <select id="set-paper-blank"></select>
+          </label>
+          <label class="row between">Notes margin of new PDF sheets
+            <select id="set-paper-pdf"></select>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Appearance</legend>
+          <label class="row between">Theme
+            <select id="set-theme">
+              <option value="system">Follow system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+        </fieldset>
+        <fieldset class="about">
+          <legend>About</legend>
+          <div class="about-head">
+            <img src="./icons/icon-192.png" alt="" width="48" height="48" />
+            <div><b>E-Notes</b><span class="muted small" id="settings-about"></span></div>
+          </div>
+          <p>
+            E-Notes is a handwriting notebook made for studying with PDFs. Every PDF page gets its own
+            notes margin; write with the S Pen, a stylus or a mouse, highlight, erase precisely, select with
+            the lasso and ask Claude about your pages. Your notebooks sync live between Windows, Linux,
+            Android and the web, and keep working offline.
+          </p>
+          <p class="credit">Created by <b>Md. Towfiq Bin Hasan</b> and <b>TH team</b>.</p>
+        </fieldset>
+        <div class="row end"><button class="btn primary" value="close">Done</button></div>
+      </form>
+    </dialog>
+
+    <!-- Export -->
+    <dialog id="export-dialog" class="dialog">
+      <form method="dialog">
+        <h2>Export PDF</h2>
+        <div id="export-options" class="export-options"></div>
+        <p id="export-progress" class="muted" hidden></p>
+        <div class="row end"><button class="btn" value="cancel">Close</button></div>
+      </form>
+    </dialog>
+
+    <!-- Sheet menu -->
+    <div id="sheet-menu" class="popup" hidden role="menu"></div>
+    <!-- Pen / eraser options -->
+    <div id="tool-popover" class="popup tool-popover" hidden></div>
+    <!-- Laser pointer trail -->
+    <canvas id="laser-canvas" class="laser-canvas"></canvas>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+    <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

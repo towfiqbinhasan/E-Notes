@@ -1,0 +1,21 @@
+node_modules/
+dist/
+release/
+.env
+.env.*
+!.env.example
+
+# copied from node_modules by scripts/copy-pdfjs-assets.mjs
+public/pdfjs/
+
+# Android build outputs (the android/ project itself is committed)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/public/
+*.keystore
+*.jks
+
+.DS_Store
+*.log

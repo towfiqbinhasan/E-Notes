@@ -1,0 +1,54 @@
+appId: com.enotes.app
+productName: E-Notes
+copyright: Copyright © Md. Towfiq Bin Hasan and TH team
+
+directories:
+  output: release
+  buildResources: build
+
+# Only the built web app and the Electron main process go into the installer.
+# Web libraries are already bundled into ./dist by Vite.
+files:
+  - dist/**
+  - electron/**
+  - package.json
+  - "!node_modules/@capacitor/**"
+
+# "enotes://" links bring Google sign-in back to the desktop app.
+protocols:
+  - name: E-Notes
+    schemes: [enotes]
+
+fileAssociations:
+  - ext: pdf
+    name: PDF Document
+    role: Viewer
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+  artifactName: E-Notes-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+
+linux:
+  target: [AppImage, deb]
+  category: Office
+  icon: build/icon.png
+  maintainer: Md. Towfiq Bin Hasan and TH team <136582948+towfiqbinhasan@users.noreply.github.com>
+  artifactName: E-Notes-${version}-${arch}.${ext}
+  mimeTypes: [x-scheme-handler/enotes]
+  syncDesktopName: true
+
+# Auto-update through GitHub Releases. Change owner/repo to your GitHub repository.
+publish:
+  provider: github
+  owner: towfiqbinhasan
+  repo: E-Notes
+  releaseType: release

@@ -1,0 +1,20 @@
+{
+  "appId": "com.enotes.app",
+  "appName": "E-Notes",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#f3f4f9"
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": false,
+      "style": "DEFAULT",
+      "backgroundColor": "#ffffff"
+    }
+  }
+}
