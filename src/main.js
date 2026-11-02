@@ -49,6 +49,9 @@ function showLogin() {
     $('login-fields').hidden = true;
   }
 
+  // Show "Sign in with Google" only when Google is switched on in Supabase.
+  showGoogleIfEnabled();
+
   const busy = (on) => {
     for (const b of document.querySelectorAll('#login-form button')) b.disabled = on;
   };
@@ -97,6 +100,18 @@ function showLogin() {
     try { localStorage.setItem(LOCAL_FLAG, '1'); } catch { /* ignore */ }
     location.reload();
   };
+}
+
+async function showGoogleIfEnabled() {
+  if (!isConfigured) return;
+  try {
+    const url = import.meta.env.VITE_SUPABASE_URL;
+    const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: import.meta.env.VITE_SUPABASE_ANON_KEY } });
+    const settings = await res.json();
+    const on = !!(settings.external && settings.external.google);
+    $('btn-google').hidden = !on;
+    $('google-divider').hidden = !on;
+  } catch { /* offline: keep the button hidden */ }
 }
 
 // Desktop / Android: Google sends us back via a deep link with ?code=...
