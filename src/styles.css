@@ -744,3 +744,34 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .sheets.switching { animation: fade-in 0.35s var(--ease); }
 
 .find-bar input::-webkit-search-cancel-button { display: none; }
+
+/* ---------- "Continue without an account" ---------- */
+.local-divider { margin: 6px 0 2px; }
+.local-btn {
+  position: relative; overflow: hidden; width: 100%;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 11px 14px; border-radius: 14px; cursor: pointer; color: var(--text);
+  background: color-mix(in srgb, var(--panel-2) 70%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
+  transition: transform 0.2s var(--spring), border-color 0.2s, background-color 0.2s, box-shadow 0.25s;
+}
+.local-btn::after { /* soft light sweep on hover */
+  content: ''; position: absolute; inset: 0; transform: translateX(-120%);
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--accent) 16%, transparent) 50%, transparent 70%);
+  transition: transform 0.7s var(--ease);
+}
+.local-btn:hover { transform: translateY(-2px); border-style: solid; border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--accent) 80%, transparent); }
+.local-btn:hover::after { transform: translateX(120%); }
+.local-btn:active { transform: translateY(0) scale(0.98); }
+.local-btn:disabled { opacity: 0.5; transform: none; }
+.local-icon {
+  width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 12px;
+  background: var(--panel); color: var(--accent); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: background 0.2s, color 0.2s;
+}
+.local-btn:hover .local-icon { background: var(--grad); color: #fff; }
+.local-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.local-text b { font-size: 14px; font-weight: 600; }
+.local-text small { font-size: 12px; color: var(--muted); }
+.local-arrow { color: var(--muted); transition: transform 0.25s var(--spring), color 0.2s; }
+.local-btn:hover .local-arrow { transform: translateX(4px); color: var(--accent); }
