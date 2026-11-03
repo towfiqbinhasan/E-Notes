@@ -6,7 +6,7 @@ import { migratePrefs, toolStyle, initPresets } from './tools.js';
 import { importPdf } from './pdf.js';
 import { exportSheets, safeFileName } from './export.js';
 import { desktop, isElectron, isNative, saveFile, applyNativeTheme, onBackButton } from './platform.js';
-import { initClaudePanel } from './ai.js';
+import { initAiPanel } from './ai.js';
 import { isConfigured } from './supabase.js';
 
 const $ = (id) => document.getElementById(id);
@@ -770,9 +770,8 @@ export function initUI(opts) {
     applyTheme();
   };
 
-  // ================= Ask Claude =================
-  const claude = initClaudePanel({
-    enabled: !localMode,
+  // ================= AI helper (free) =================
+  const aiPanel = initAiPanel({
     getCurrent: () => {
       const v = centerView();
       if (!v) return null;
@@ -782,7 +781,7 @@ export function initUI(opts) {
     scrollToSheet: (id) => requestAnimationFrame(() => scrollToSheet(id)),
     toast,
   });
-  $('btn-ai').onclick = () => claude.toggle();
+  $('btn-ai').onclick = () => aiPanel.toggle();
 
   // ================= sync status & account =================
   const STATUS_TEXT = { synced: 'Synced', syncing: 'Syncing…', offline: 'Offline', error: 'Sync error', local: 'This device only', signin: 'Sign in to sync' };
@@ -903,7 +902,7 @@ export function initUI(opts) {
     if (!menu.hidden) { closeMenu(); return true; }
     if (presets.isOpen()) { presets.close(); return true; }
     if (input.hasSelection()) { input.clearSelection(); return true; }
-    if (claude.isOpen()) { claude.toggle(false); return true; }
+    if (aiPanel.isOpen()) { aiPanel.toggle(false); return true; }
     if (app.classList.contains('sidebar-open')) { toggleSidebar(false); return true; }
     return false;
   });

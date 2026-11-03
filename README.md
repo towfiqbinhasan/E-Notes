@@ -243,48 +243,29 @@ plugins still need a new APK.
 Data is never lost during an update. Notes live in Supabase, and every device
 also keeps a local copy in IndexedDB.
 
-## 9. Claude (Ask Claude panel)
+## 9. AI helper (free)
 
-The ✨ button in the top bar opens **Ask Claude**. Anyone signed in with their
-email (or Google) account can ask Claude about the sheet in the middle of the
-screen:
+The ✨ button in the top bar opens the **AI helper**. It reads the sheet in the
+middle of the screen.
 
-- **Handwriting → text**: turns your handwritten notes into typed text.
-- **Summarize**, **Explain page**, **Quiz me**, or any question you type
-  (English or বাংলা).
-- **Add to sheet**: puts the answer in the free part of the notes margin, or on
-  a new sheet below if the margin is full.
+**Free, offline, no key:**
+- **Read aloud**: reads the page out loud (English or বাংলা), using the device's
+  own voice (Android text-to-speech, or the system voices on Windows/Linux/web).
+- **Key points**: picks the most important sentences of the page.
+- **Page text**: copies the printed text of the PDF page.
 
-How it works: the app sends a picture of the sheet to a Supabase **Edge
-Function** (`supabase/functions/claude`). The function checks who is signed in,
-counts their requests, and calls Claude (`claude-opus-5-5`) with **your**
-Anthropic API key, which stays on the server and is never inside the app.
-You, the owner, pay for the Claude usage of every user.
+These work on PDF pages that contain real text (not scanned images).
 
-Setup (once):
+**Gemini (free Google key):** Handwriting → text, Summarize, Explain page,
+Quiz me, Translate বাংলা ⇄ English, and questions about the sheet.
 
-1. Create an API key at https://console.anthropic.com → **API Keys** and add
-   some credit under **Billing**.
-2. Run the latest `supabase/schema.sql` again (it adds the `ai_usage` table for
-   the daily limit).
-3. In this folder, deploy the function with the Supabase CLI:
-   ```bash
-   npx supabase login
-   npx supabase link --project-ref YOUR-PROJECT-REF
-   npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-   npx supabase functions deploy claude
-   ```
-4. Optional secrets:
-   - `ALLOWED_EMAILS`: only these accounts may use Claude, e.g.
-     `npx supabase secrets set ALLOWED_EMAILS=me@gmail.com,friend@gmail.com`.
-     Without it, every signed-in user can use Claude.
-   - `AI_DAILY_LIMIT`: requests per user per day (default `50`).
+1. Open https://aistudio.google.com/apikey and sign in with Google.
+2. Press **Create API key** (no card needed), copy it.
+3. In E-Notes open ✨ AI helper, paste the key, press **Save key**.
 
-Changing a secret takes effect immediately; no redeploy is needed. In "use
-without an account" mode the panel is disabled, because Claude needs a
-signed-in user. If a safety check declines a request, the function asks the API
-to retry on a suitable fallback model (`fallbacks: "default"`); you can remove
-those two lines in `index.ts` if you don't want that.
+The key is stored only on that device (enter it once on each device). Free
+Gemini keys have daily limits, and Google may use free-tier requests to improve
+its models, so keep very private notes out.
 
 ---
 
@@ -303,14 +284,14 @@ src/
   sync.js      Supabase push / pull / Realtime
   pdf.js       pdf.js rendering + page image cache
   export.js    PDF export with pdf-lib
-  ai.js        Ask Claude panel (sheet picture -> Edge Function)
+  ai.js        AI helper: offline tools + Gemini (user's free key)
   platform.js  web / Electron / Android differences (save, share, deep links, status bar)
   supabase.js  Supabase client from .env
   styles.css
 public/        manifest, service worker, icons
 electron/      main.js (window, menu, updater, app:// protocol), preload.js
 android/       Capacitor Android project
-supabase/      schema.sql, functions/claude (Edge Function that calls Claude)
+supabase/      schema.sql
 scripts/       copy pdf.js assets, generate icons
 ```
 

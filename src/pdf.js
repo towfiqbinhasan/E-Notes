@@ -86,6 +86,20 @@ export async function getDoc(path) {
   return loadDoc(hash, await getPdfBytes(path));
 }
 
+/** The printed text of one PDF page (empty for scanned pages without a text layer). */
+export async function getPageText(path, pageNum) {
+  const doc = await getDoc(path);
+  const page = await doc.getPage(pageNum);
+  const content = await page.getTextContent();
+  let out = '';
+  for (const it of content.items) {
+    if (!('str' in it)) continue;
+    out += it.str;
+    out += it.hasEOL ? '\n' : (it.str && !it.str.endsWith(' ') ? ' ' : '');
+  }
+  return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 // ---------- rendering with a small queue (max 2 pages at once) ----------
 
 let running = 0;

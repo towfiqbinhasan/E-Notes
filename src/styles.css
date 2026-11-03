@@ -595,3 +595,13 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- AI helper sections ---------- */
+.ai-section { padding: 0 12px 10px; border-bottom: 1px solid var(--border); }
+.ai-section .ai-actions { padding: 0; border: 0; }
+.ai-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 6px 0 8px; }
+.ai-key p { margin: 0 0 8px; line-height: 1.5; }
+.ai-key input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+.ai-key input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.ai-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-note { margin: 0; padding: 0 12px 10px; font-size: 11px; }

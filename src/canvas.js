@@ -104,7 +104,7 @@ export function drawItem(ctx, it) {
   ctx.restore();
 }
 
-/** Draw text boxes onto a canvas scaled to sheet units (export and Claude pictures). */
+/** Draw text boxes onto a canvas scaled to sheet units (export and AI pictures). */
 export function drawTextItems(ctx, items) {
   const font = getComputedStyle(document.body).fontFamily;
   ctx.save();

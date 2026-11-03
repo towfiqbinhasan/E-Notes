@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#171a23" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="E-Notes: handwrite notes next to your PDFs. Syncs live across Windows, Linux, Android and the web. Created by Md. Towfiq Bin Hasan and TH team." />
     <meta name="author" content="Md. Towfiq Bin Hasan and TH team" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*;" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/png" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
@@ -81,7 +81,7 @@
             <button class="icon-btn" id="btn-add-pdf" title="Add PDF (Ctrl+O)"></button>
             <button class="icon-btn" id="btn-add-sheet" title="Add blank sheet"></button>
             <button class="icon-btn" id="btn-export" title="Export PDF (Ctrl+E)"></button>
-            <button class="icon-btn ai-btn" id="btn-ai" title="Ask Claude about this sheet"></button>
+            <button class="icon-btn ai-btn" id="btn-ai" title="AI helper (free)"></button>
             <button class="icon-btn" id="btn-theme" title="Light / dark"></button>
           </div>
           <div class="toolbar" id="toolbar" role="toolbar" aria-label="Drawing tools">
@@ -124,27 +124,54 @@
         <button id="page-pill" class="page-pill" title="Go to sheet" hidden></button>
         <div id="drop-overlay" class="drop-overlay" hidden><div>Drop PDF files to add them</div></div>
 
-        <!-- Ask Claude -->
-        <aside id="ai-panel" class="ai-panel" hidden aria-label="Ask Claude">
+        <!-- AI helper (free) -->
+        <aside id="ai-panel" class="ai-panel" hidden aria-label="AI helper">
           <div class="ai-head">
-            <strong>Ask Claude</strong>
+            <strong>AI helper</strong>
             <span id="ai-sheet" class="muted small"></span>
             <button class="icon-btn" id="ai-close" title="Close">✕</button>
           </div>
-          <div class="ai-actions">
-            <button class="btn small" data-ai="transcribe">Handwriting → text</button>
-            <button class="btn small" data-ai="summarize">Summarize</button>
-            <button class="btn small" data-ai="explain">Explain page</button>
-            <button class="btn small" data-ai="quiz">Quiz me</button>
+          <div class="ai-section">
+            <div class="ai-section-title">Free · works offline</div>
+            <div class="ai-actions">
+              <button class="btn small" data-offline="read">🔊 Read aloud</button>
+              <button class="btn small" data-offline="points">Key points</button>
+              <button class="btn small" data-offline="text">Page text</button>
+            </div>
+          </div>
+          <div class="ai-section">
+            <div class="ai-section-title">Gemini AI · free key</div>
+            <div class="ai-actions" id="ai-gemini-actions" hidden>
+              <button class="btn small" data-ai="transcribe">Handwriting → text</button>
+              <button class="btn small" data-ai="summarize">Summarize</button>
+              <button class="btn small" data-ai="explain">Explain page</button>
+              <button class="btn small" data-ai="quiz">Quiz me</button>
+              <button class="btn small" data-ai="translate">Translate বাংলা ⇄ English</button>
+            </div>
+            <div id="ai-key-setup" class="ai-key" hidden>
+              <p class="small">
+                Read handwriting, summarize, explain and chat about your pages with Google Gemini. The key is free
+                (no card): <a href="#" id="ai-key-link">open Google AI Studio</a>, sign in, press <b>Create API key</b>,
+                then paste it here.
+              </p>
+              <form id="ai-key-form" class="row">
+                <input id="ai-key-input" type="password" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" />
+                <button class="btn small primary" type="submit">Save key</button>
+              </form>
+            </div>
           </div>
           <div id="ai-log" class="ai-log">
-            <p class="muted small">Claude reads the sheet in the middle of the screen. Ask anything about it, in English or বাংলা.</p>
+            <p class="muted small">The helper reads the sheet in the middle of the screen. Ask anything about it, in English or বাংলা.</p>
           </div>
-          <form id="ai-form" class="ai-form">
+          <form id="ai-form" class="ai-form" hidden>
             <textarea id="ai-input" rows="2" placeholder="Ask about this sheet…"></textarea>
             <button class="btn primary" type="submit">Send</button>
           </form>
-          <p id="ai-foot" class="muted small ai-foot"></p>
+          <div class="ai-foot">
+            <span id="ai-key-status" class="muted small"></span>
+            <button type="button" class="link small" id="ai-key-remove" hidden>Remove key</button>
+          </div>
+          <p class="muted small ai-note">Free Gemini keys: Google may use what you send to improve its models. Keep very private notes out.</p>
         </aside>
       </main>
     </div>
@@ -202,7 +229,7 @@
           <p>
             E-Notes is a handwriting notebook made for studying with PDFs. Every PDF page gets its own
             notes margin; write with the S Pen, a stylus or a mouse, highlight, erase precisely, select with
-            the lasso and ask Claude about your pages. Your notebooks sync live between Windows, Linux,
+            the lasso and use the free AI helper on your pages. Your notebooks sync live between Windows, Linux,
             Android and the web, and keep working offline.
           </p>
           <p class="credit">Created by <b>Md. Towfiq Bin Hasan</b> and <b>TH team</b>.</p>

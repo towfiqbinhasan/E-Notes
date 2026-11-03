@@ -20,6 +20,14 @@ export async function getLastUser() {
 export async function setLastUser(user) {
   return (await getGlobalDb()).put('kv', user, 'lastUser');
 }
+/** Per-device settings that are not notebook data (e.g. the user's own Gemini API key). */
+export async function getDeviceSetting(key) {
+  return (await getGlobalDb()).get('kv', `setting:${key}`);
+}
+export async function setDeviceSetting(key, value) {
+  const d = await getGlobalDb();
+  return value == null || value === '' ? d.delete('kv', `setting:${key}`) : d.put('kv', value, `setting:${key}`);
+}
 export async function clearLastUser() {
   return (await getGlobalDb()).delete('kv', 'lastUser');
 }
