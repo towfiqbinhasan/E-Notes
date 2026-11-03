@@ -268,7 +268,7 @@ async function askGemini(key, { prompt, image, history }, onStatus = () => {}, o
   const turns = [...history, { role: 'user', content: prompt }];
   const contents = turns.map((t, i) => ({
     role: t.role === 'assistant' ? 'model' : 'user',
-    parts: i === 0 ? [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text: t.content }] : [{ text: t.content }],
+    parts: i === 0 && image ? [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text: t.content }] : [{ text: t.content }],
   }));
   const bodyFor = (model) => {
     const generationConfig = { maxOutputTokens: 4096, temperature: 0.4 };
@@ -370,6 +370,7 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } },
         ] };
       }
+      if (pageText === undefined) return { role: 'user', content: t.content }; // general question, no sheet
       return { role: 'user', content: `${t.content}\n\nText printed on this sheet (handwriting not included):\n${pageText || '(none)'}` };
     })];
     return fetch(`${GROQ}/chat/completions`, {
@@ -381,9 +382,11 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
   let lastError = null;
   // First models that can see the sheet picture; then text-only models with the printed text.
   // A question about an attached picture never goes to a model that cannot see it.
-  for (const withImage of pageText === null ? [true] : [true, false]) {
+  const passes = !image ? [false] : pageText === null ? [true] : [true, false];
+  for (const withImage of passes) {
     for (const m of models) {
-      if (withImage === groqTextOnly.has(m)) continue;
+      if (withImage && groqTextOnly.has(m)) continue;
+      if (!withImage && image && !groqTextOnly.has(m)) continue; // with a picture, text-only is the fallback
       const res = await send(m, withImage);
       if (res.ok) {
         let out = '', finish = null;
@@ -616,7 +619,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     historySheet = sheetId;
     const d = document.createElement('div');
     d.className = 'ai-divider';
-    d.textContent = `Sheet ${index + 1}`;
+    d.textContent = index >= 0 ? `Sheet ${index + 1}` : 'General question';
     log.append(d);
   }
 
@@ -698,10 +701,11 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
   async function ask(action, question, label) {
     if (busy || !hasAi()) return;
     const cur = getCurrent();
-    if (!cur) { toast('Open a notebook with at least one sheet first'); return; }
+    // Buttons like Summarize need something to read; a typed question works anywhere.
+    if (!cur && !attached && action !== 'ask') { toast('Open a sheet, or attach a picture (📎), first'); return; }
     if (!navigator.onLine) { toast('AI needs an internet connection', { error: true }); return; }
-    const { sheet, index } = cur;
-    divider(sheet.id, index);
+    const sheet = cur ? cur.sheet : null;
+    divider(sheet ? sheet.id : 'general', cur ? cur.index : -1);
     busy = true;
     panel.classList.add('busy');
     const pic = attached;
@@ -711,11 +715,12 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
       clearAttachment();
     }
     bubble('user', label, '', pic);
-    const waiting = bubble('assistant', pic ? 'Looking at the picture…' : 'Reading the sheet…', 'waiting');
+    const waiting = bubble('assistant', pic ? 'Looking at the picture…' : sheet ? 'Reading the sheet…' : 'Thinking…', 'waiting');
     const status = (msg) => { waiting.querySelector('.ai-text').textContent = msg; };
     try {
-      const image = pic || await cachedSheetPicture(sheet);
-      const pageText = pic ? null : await sheetText(sheet); // null: a picture-only question
+      const image = pic || (sheet ? await cachedSheetPicture(sheet) : null);
+      // null: a picture-only question; undefined: a general question without a sheet
+      const pageText = pic ? null : sheet ? await sheetText(sheet) : undefined;
       let prompt = action === 'ask' ? question : PROMPTS[action];
       if (pic && action !== 'ask') prompt = prompt.replace(/this sheet|this page|the page|my notes/gi, 'this picture');
       // "Fastest": Groq first (answers in about a second). "Best": Gemini first (better with Bangla handwriting).
