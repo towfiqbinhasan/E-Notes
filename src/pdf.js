@@ -1,7 +1,9 @@
 // PDF handling: import + hash, local storage of the original file, rendering
 // pages with pdf.js (bundled, works offline) and caching rendered pages in IndexedDB.
-import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+// The "legacy" build carries polyfills: the modern one needs very new JavaScript
+// (e.g. Map.getOrInsertComputed) that phone WebViews don't have yet, so no PDF would open there.
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { getDb } from './db.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
