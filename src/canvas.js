@@ -523,6 +523,7 @@ export class SheetView {
       if (it.t !== 'text' || it.deleted_at || it.id === keep) continue;
       this.textLayer.append(makeTextBox(this, it));
     }
+    if (currentText && currentText.view === this) placeTextBar();
   }
 
   textEl(id) {
@@ -602,8 +603,108 @@ function setCurrentText(view, id) {
   if (currentText) { const old = currentText.view.textEl(currentText.id); if (old) old.classList.remove('current'); }
   currentText = id ? { view, id } : null;
   if (currentText) { const el = view.textEl(id); if (el) el.classList.add('current'); }
+  placeTextBar();
 }
 export const clearCurrentText = () => setCurrentText(null, null);
+
+const currentTextEl = () => (currentText ? currentText.view.textEl(currentText.id) : null);
+
+// Small bar above the current text box: drag ✥ to move it, A− / A+ to resize, delete.
+let textBar = null;
+function getTextBar() {
+  if (textBar) return textBar;
+  textBar = document.createElement('div');
+  textBar.className = 'text-bar';
+  const btn = (html, title, cls) => {
+    const b = document.createElement('button');
+    b.innerHTML = html;
+    b.title = title;
+    b.className = cls;
+    // Keep the text box focused (and the keyboard open) while using the bar.
+    b.addEventListener('mousedown', (e) => e.preventDefault());
+    textBar.append(b);
+    return b;
+  };
+  const grip = btn('✥', 'Drag to move the text', 'tb-move');
+  btn('A−', 'Smaller text (Ctrl+Shift+<)', 'tb-size').onclick = () => textHooks.bump(-1);
+  btn('A+', 'Bigger text (Ctrl+Shift+>)', 'tb-size').onclick = () => textHooks.bump(1);
+  btn('🗑', 'Delete this text', 'tb-del').onclick = deleteCurrentText;
+  grip.addEventListener('pointerdown', startTextMove);
+  return textBar;
+}
+
+function placeTextBar() {
+  const bar = getTextBar();
+  const el = currentTextEl();
+  if (!el) { bar.remove(); return; }
+  const x = Number(el.dataset.x), y = Number(el.dataset.y);
+  bar.style.left = `calc(${x}px * var(--z))`;
+  bar.style.top = `max(0px, calc(${y}px * var(--z) - 38px))`;
+  if (bar.parentNode !== currentText.view.textLayer) currentText.view.textLayer.append(bar);
+}
+
+/** Put a text box at (x, y) on screen; saved by saveTextPlace() (or on blur while typing). */
+function setTextPlace(el, x, y) {
+  el.dataset.x = x;
+  el.dataset.y = y;
+  el.style.left = `calc(${x}px * var(--z))`;
+  el.style.top = `calc(${y}px * var(--z))`;
+  if (!el.dataset.w) el.style.maxWidth = `calc(${SHEET_W - x}px * var(--z))`;
+  placeTextBar();
+}
+
+async function saveTextPlace() {
+  const el = currentTextEl();
+  if (!el || el === document.activeElement) return; // still typing: saved when the box closes
+  const { view, id } = currentText;
+  const item = view.sheet.strokes.find((it) => it.id === id && !it.deleted_at);
+  const x = Number(el.dataset.x), y = Number(el.dataset.y);
+  if (!item || (item.x === x && item.y === y)) return;
+  const copy = { ...item, id: uid(), x, y };
+  currentText = { view, id: copy.id };
+  await commit(view.sheet.id, [copy], [item]);
+}
+
+function startTextMove(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const el = currentTextEl();
+  if (!el) return;
+  const grip = e.currentTarget;
+  grip.setPointerCapture(e.pointerId);
+  const z = currentText.view.zoom;
+  const h = currentText.view.sheet.height;
+  const start = { cx: e.clientX, cy: e.clientY, x: Number(el.dataset.x), y: Number(el.dataset.y) };
+  const r = (n) => Math.round(n * 10) / 10;
+  const move = (ev) => {
+    const box = currentTextEl();
+    if (!box) return;
+    const x = Math.max(0, Math.min(SHEET_W - 20, start.x + (ev.clientX - start.cx) / z));
+    const y = Math.max(0, Math.min(h - 10, start.y + (ev.clientY - start.cy) / z));
+    setTextPlace(box, r(x), r(y));
+  };
+  const up = async () => {
+    grip.removeEventListener('pointermove', move);
+    grip.removeEventListener('pointerup', up);
+    grip.removeEventListener('pointercancel', up);
+    await textSaving;
+    await saveTextPlace();
+  };
+  grip.addEventListener('pointermove', move);
+  grip.addEventListener('pointerup', up);
+  grip.addEventListener('pointercancel', up);
+}
+
+async function deleteCurrentText() {
+  const el = currentTextEl();
+  if (el && el === document.activeElement) { el.textContent = ''; el.blur(); return; } // blur removes it
+  await textSaving;
+  if (!currentText) return;
+  const { view, id } = currentText;
+  const item = view.sheet.strokes.find((it) => it.id === id && !it.deleted_at);
+  clearCurrentText();
+  if (item) await commit(view.sheet.id, [], [item]);
+}
 
 /** Change the size of the current text box. `final` = save it (else only show it). */
 export async function resizeCurrentText(size, final = true) {
@@ -632,6 +733,9 @@ function makeTextBox(view, item, isNew = false) {
   try { el.contentEditable = 'plaintext-only'; } catch { el.contentEditable = 'true'; }
   if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
   el.spellcheck = true;
+  el.dataset.x = item.x;
+  el.dataset.y = item.y;
+  if (item.w) el.dataset.w = item.w;
   el.style.left = `calc(${item.x}px * var(--z))`;
   el.style.top = `calc(${item.y}px * var(--z))`;
   el.style.maxWidth = `calc(${item.w ?? SHEET_W - item.x}px * var(--z))`;
@@ -648,12 +752,13 @@ function makeTextBox(view, item, isNew = false) {
   el.addEventListener('blur', async () => {
     const text = el.innerText.replace(/\n+$/, '');
     const size = Number(el.dataset.size) || item.s;
-    if (text === (item.text || '') && size === item.s) {
+    const x = Number(el.dataset.x), y = Number(el.dataset.y);
+    if (text === (item.text || '') && size === item.s && x === item.x && y === item.y) {
       if (isNew) { el.remove(); if (currentText && currentText.id === item.id) clearCurrentText(); }
       return;
     }
     // Edits create a new item and tombstone the old one (keeps sync conflict-free).
-    const added = text.trim() ? [{ ...item, id: uid(), text, s: size, created: isNew ? item.created : Date.now() }] : [];
+    const added = text.trim() ? [{ ...item, id: uid(), text, s: size, x, y, created: isNew ? item.created : Date.now() }] : [];
     const removed = isNew ? [] : [item];
     el.remove();
     setCurrentText(view, added.length ? added[0].id : null);

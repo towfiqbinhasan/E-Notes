@@ -400,6 +400,17 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .viewport.tool-text .textbox { pointer-events: auto; cursor: text; }
 .viewport.tool-text .textbox:hover { box-shadow: 0 0 0 1px rgba(80, 70, 229, 0.35); }
 .viewport.tool-text .textbox.current:not(:focus) { outline: 1.5px dashed rgba(80, 70, 229, 0.55); outline-offset: 2px; }
+/* Bar above the text box being written: move / size / delete. */
+.text-bar {
+  position: absolute; z-index: 3; display: flex; gap: 2px; padding: 3px; pointer-events: auto;
+  background: rgba(23, 26, 38, 0.92); border-radius: 10px; box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.45);
+  animation: pop-in 0.18s var(--spring);
+}
+.text-bar button { border: 0; background: transparent; color: #fff; font-size: 13px; font-weight: 600; min-width: 30px; height: 28px; border-radius: 7px; cursor: pointer; }
+.text-bar button:hover { background: rgba(255, 255, 255, 0.14); }
+.text-bar .tb-move { cursor: grab; font-size: 16px; touch-action: none; }
+.text-bar .tb-move:active { cursor: grabbing; }
+.viewport:not(.tool-text) .text-bar { display: none; }
 .textbox:focus { box-shadow: 0 0 0 2px rgba(80, 70, 229, 0.6); background: rgba(255, 255, 255, 0.9); pointer-events: auto; }
 .sheet-menu-btn {
   position: absolute; top: 8px; right: 8px; width: 32px; height: 32px; border-radius: 10px;
