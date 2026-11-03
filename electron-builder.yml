@@ -40,7 +40,7 @@ nsis:
 linux:
   target: [AppImage, deb]
   category: Office
-  icon: build/icon.png
+  icon: build/icons          # 16..512 px PNGs, so menus and the dock find the icon
   maintainer: Md. Towfiq Bin Hasan and TH team <136582948+towfiqbinhasan@users.noreply.github.com>
   artifactName: E-Notes-${version}-${arch}.${ext}
   mimeTypes: [x-scheme-handler/enotes]

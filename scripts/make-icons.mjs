@@ -1,6 +1,6 @@
 // Generates the app icons as PNG files without any image tools:
 //   public/icons/icon-192.png, icon-512.png, maskable-512.png  (PWA)
-//   build/icon.png (1024)                                       (Electron installers)
+//   build/icon.png (1024), build/icons/NxN.png                  (Electron installers)
 // Design: indigo-violet rounded square, white "sheet" with a PDF block and a pen line.
 // Replace these files with your own artwork whenever you like.
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -87,6 +87,9 @@ writeFileSync('public/icons/icon-192.png', png(192, design(0)));
 writeFileSync('public/icons/icon-512.png', png(512, design(0)));
 writeFileSync('public/icons/maskable-512.png', png(512, design(0.1)));
 writeFileSync('build/icon.png', png(1024, design(0)));
+// Linux needs the usual icon sizes (desktop menus only look up to 512x512).
+mkdirSync('build/icons', { recursive: true });
+for (const n of [16, 24, 32, 48, 64, 128, 256, 512]) writeFileSync(`build/icons/${n}x${n}.png`, png(n, design(0)));
 console.log('Icons written to public/icons and build/icon.png');
 
 // Android launcher icons (only when the android/ project exists).
