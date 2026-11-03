@@ -252,7 +252,8 @@ async function askGemini(key, { prompt, image, history }, onStatus = () => {}) {
 // =====================================================================
 
 const GROQ = 'https://api.groq.com/openai/v1';
-let groqModels = null; // { vision: [...], text: [...] }
+let groqModels = null;        // usable chat models, best first
+const groqTextOnly = new Set(); // models that turned out not to accept pictures
 
 async function groqError(res) {
   let msg = `Groq error ${res.status}`;
@@ -263,7 +264,7 @@ async function groqError(res) {
   return Object.assign(new Error(msg), { status: res.status });
 }
 
-/** Groq models this key can use: ones that can see pictures first, then text-only ones. */
+/** Groq chat models this key can use, best first. Which ones can read pictures is found out by trying. */
 async function pickGroqModels(key) {
   if (groqModels) return groqModels;
   const res = await fetch(`${GROQ}/models`, { headers: { Authorization: `Bearer ${key}` } });
@@ -271,26 +272,24 @@ async function pickGroqModels(key) {
   const ids = ((await res.json()).data || [])
     .filter((m) => m.active !== false)
     .map((m) => m.id)
-    .filter((id) => !/(whisper|tts|guard|embed|playai|orpheus|compound|distil)/i.test(id));
-  const vision = ids.filter((id) => /llama-4|vision|scout|maverick/i.test(id))
-    .sort((a, b) => (/scout/.test(b) ? 1 : 0) - (/scout/.test(a) ? 1 : 0));
-  const rank = (id) => (/llama-3\.3-70b/.test(id) ? 0 : /gpt-oss-120b/.test(id) ? 1 : /70b|120b|qwen|kimi/.test(id) ? 2 : 3);
-  const text = ids.filter((id) => !vision.includes(id)).sort((a, b) => rank(a) - rank(b));
-  if (!vision.length && !text.length) throw new Error('No Groq model is available for this key.');
-  groqModels = { vision, text };
+    .filter((id) => !/(whisper|tts|guard|embed|playai|orpheus|compound|distil|allam|saba|arabic)/i.test(id));
+  const rank = (id) =>
+    /qwen|llama-4|vision|scout|maverick|gemma|kimi/i.test(id) ? 0   // likely to read pictures
+      : /gpt-oss-120b/.test(id) ? 1
+        : /llama-3\.3-70b|70b|120b/.test(id) ? 2
+          : 3;
+  groqModels = ids.sort((a, b) => rank(a) - rank(b));
+  if (!groqModels.length) throw new Error('No Groq model is available for this key.');
   return groqModels;
 }
 
 async function askGroq(key, { prompt, image, pageText, history }, onStatus = () => {}) {
-  const { vision, text } = await pickGroqModels(key);
-  // Picture-reading models first; text-only models get the page's printed text instead.
-  const order = [...vision.slice(0, 2).map((m) => ({ m, img: true })), ...text.slice(0, 2).map((m) => ({ m, img: false }))];
-  let lastError = null;
-  for (const { m, img } of order) {
+  const models = (await pickGroqModels(key)).slice(0, 4);
+  const send = (model, withImage) => {
     const turns = [...history, { role: 'user', content: prompt }];
     const messages = [{ role: 'system', content: SYSTEM }, ...turns.map((t, i) => {
       if (i !== 0) return { role: t.role, content: t.content };
-      if (img) {
+      if (withImage) {
         return { role: 'user', content: [
           { type: 'text', text: t.content },
           { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } },
@@ -298,21 +297,30 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
       }
       return { role: 'user', content: `${t.content}\n\nText printed on this sheet (handwriting not included):\n${pageText || '(none)'}` };
     })];
-    const res = await fetch(`${GROQ}/chat/completions`, {
+    return fetch(`${GROQ}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: m, messages, temperature: 0.4, max_completion_tokens: 4096 }),
+      body: JSON.stringify({ model, messages, temperature: 0.4, max_completion_tokens: 4096 }),
     });
-    if (res.ok) {
-      const data = await res.json();
-      const c = data.choices && data.choices[0];
-      const out = (c && c.message && c.message.content) || '';
-      return { text: plain(out) || '(no answer)', truncated: !!c && c.finish_reason === 'length', provider: 'Groq' };
+  };
+  let lastError = null;
+  // First models that can see the sheet picture; then text-only models with the printed text.
+  for (const withImage of [true, false]) {
+    for (const m of models) {
+      if (withImage === groqTextOnly.has(m)) continue;
+      const res = await send(m, withImage);
+      if (res.ok) {
+        const data = await res.json();
+        const c = data.choices && data.choices[0];
+        const out = (c && c.message && c.message.content) || '';
+        return { text: plain(out) || '(no answer)', truncated: !!c && c.finish_reason === 'length', provider: 'Groq' };
+      }
+      lastError = await groqError(res);
+      if (withImage && res.status === 400) { groqTextOnly.add(m); continue; } // no pictures: use it text-only later
+      if (res.status === 404) { groqModels = null; continue; }                  // model retired
+      if (!lastError.retryable) throw lastError;
+      onStatus('Groq is busy, trying another model…');
     }
-    lastError = await groqError(res);
-    if (res.status === 404) { groqModels = null; continue; }   // model retired
-    if (!lastError.retryable && res.status !== 400) throw lastError; // 400: this model may not take the picture
-    onStatus('Groq is busy, trying another model…');
   }
   throw lastError || new Error('Groq did not answer. Please try again.');
 }
@@ -432,7 +440,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
   }
   const CHECK = {
     gemini: async (key) => { modelCache = null; return pickModel(key); },
-    groq: async (key) => { groqModels = null; const m = await pickGroqModels(key); return m.vision[0] || m.text[0]; },
+    groq: async (key) => { groqModels = null; return (await pickGroqModels(key))[0]; },
   };
   for (const a of panel.querySelectorAll('[data-key-link]')) {
     a.onclick = (e) => { e.preventDefault(); openExternal(a.dataset.keyLink); };

@@ -266,7 +266,7 @@ Translate বাংলা ⇄ English, and questions about the sheet. Add one or
 | Provider | Get the key | Notes |
 |---|---|---|
 | Google Gemini | https://aistudio.google.com/apikey → **Create API key** | best at handwriting and Bangla; busy at peak times |
-| Groq | https://console.groq.com/keys → **Create API Key** | very fast; reads pictures with Llama 4 |
+| Groq | https://console.groq.com/keys → **Create API Key** | very fast; reads pictures (Qwen), reads handwriting |
 
 In E-Notes open ✨ AI helper, paste the key, press **Save** (once per device;
 the key stays on that device). Free keys have daily limits, and providers may
