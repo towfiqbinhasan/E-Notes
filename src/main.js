@@ -240,7 +240,7 @@ async function startApp(user, { localMode = false, offlineOnly = false } = {}) {
   let sync = null;
   let ui = null;
   const begin = () => {
-    sync = startSync({ supabase, userId: user.id, onStatus: (s) => ui && ui.setSyncStatus(s) });
+    sync = startSync({ supabase, userId: user.id, onStatus: (s, detail) => ui && ui.setSyncStatus(s, detail) });
     sync.onLiveInk((payload) => ui && ui.showLiveInk(payload));
   };
 

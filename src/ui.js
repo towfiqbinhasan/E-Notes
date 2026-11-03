@@ -842,11 +842,13 @@ export function initUI(opts) {
 
   // ================= sync status & account =================
   const STATUS_TEXT = { synced: 'Synced', syncing: 'Syncing…', offline: 'Offline', error: 'Sync error', local: 'This device only', signin: 'Sign in to sync' };
-  function setSyncStatus(s) {
+  function setSyncStatus(s, detail = '') {
     const el = $('sync-status');
     el.className = `sync-status ${s}`;
     el.querySelector('span').textContent = STATUS_TEXT[s] || s;
-    el.title = s === 'error' ? 'Changes are saved on this device and will retry automatically' : STATUS_TEXT[s] || '';
+    el.title = s === 'error'
+      ? `${detail ? detail + '\n' : ''}Changes are saved on this device and will retry automatically`
+      : STATUS_TEXT[s] || '';
   }
   setSyncStatus(localMode ? 'local' : 'syncing');
 
