@@ -100,6 +100,39 @@ export async function getPageText(path, pageNum) {
   return out.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+const textCache = new Map(); // "path|page" -> {text, spans}
+
+/**
+ * Page text with where every piece sits on the page (for "find in PDF").
+ * spans: [{start, end, x, y, w, h}] with x/y/w/h as fractions (0..1) of the page width/height.
+ */
+export async function getPageTextLayout(path, pageNum) {
+  const key = `${path}|${pageNum}`;
+  if (textCache.has(key)) return textCache.get(key);
+  const doc = await getDoc(path);
+  const page = await doc.getPage(pageNum);
+  const vp = page.getViewport({ scale: 1 });
+  const content = await page.getTextContent();
+  let text = '';
+  const spans = [];
+  for (const it of content.items) {
+    if (!('str' in it) || !it.str) { if (it.hasEOL) text += ' '; continue; }
+    const tx = pdfjs.Util.transform(vp.transform, it.transform);
+    const fontH = Math.hypot(tx[2], tx[3]) || Math.abs(it.height) || 10;
+    const w = Math.abs(it.width * vp.scale) || fontH * it.str.length * 0.5;
+    spans.push({
+      start: text.length, end: text.length + it.str.length,
+      x: tx[4] / vp.width, y: (tx[5] - fontH) / vp.height, w: w / vp.width, h: (fontH * 1.2) / vp.height,
+    });
+    text += it.str;
+    text += it.hasEOL || !it.str.endsWith(' ') ? ' ' : '';
+  }
+  const out = { text, spans };
+  textCache.set(key, out);
+  if (textCache.size > 2000) textCache.delete(textCache.keys().next().value);
+  return out;
+}
+
 // ---------- rendering with a small queue (max 2 pages at once) ----------
 
 let running = 0;

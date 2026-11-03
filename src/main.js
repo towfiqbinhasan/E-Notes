@@ -41,44 +41,120 @@ function showLogin() {
   $('splash').hidden = true;
   $('app').hidden = true;
   $('login').hidden = false;
+  const card = $('login-form');
   const msg = $('login-message');
-  const say = (text, error = false) => { msg.textContent = text; msg.classList.toggle('error', error); };
+  const say = (text, error = false) => {
+    msg.textContent = text;
+    msg.classList.toggle('error', error);
+    if (error) { card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); }
+  };
 
   if (!isConfigured) {
     $('login-config-warning').hidden = false;
     $('login-fields').hidden = true;
   }
 
-  // Show "Sign in with Google" only when Google is switched on in Supabase.
+  // Show "Continue with Google" only when Google is switched on in Supabase.
   showGoogleIfEnabled();
+
+  // ----- Sign in / Create account tabs -----
+  let mode = 'signin';
+  const setMode = (m) => {
+    mode = m;
+    for (const t of card.querySelectorAll('.auth-tab')) t.classList.toggle('active', t.dataset.mode === m);
+    card.querySelector('.auth-tabs').classList.toggle('second', m === 'signup');
+    $('signup-extra').classList.toggle('open', m === 'signup');
+    $('forgot-row').classList.toggle('gone', m === 'signup');
+    $('btn-submit').querySelector('.label').textContent = m === 'signup' ? 'Create account' : 'Sign in';
+    $('login-sub').textContent = m === 'signup' ? 'Create your free account. It takes 10 seconds.' : 'Welcome back! Sign in to your notebooks.';
+    $('login-password').autocomplete = m === 'signup' ? 'new-password' : 'current-password';
+    say('');
+    checkMatch();
+  };
+  for (const t of card.querySelectorAll('.auth-tab')) t.onclick = () => setMode(t.dataset.mode);
+
+  // ----- show / hide password -----
+  for (const btn of card.querySelectorAll('.pw-toggle')) {
+    btn.onclick = () => {
+      const input = $(btn.dataset.for);
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      btn.classList.toggle('on', show);
+      btn.title = show ? 'Hide password' : 'Show password';
+    };
+  }
+
+  // ----- password strength + "passwords match" -----
+  const strength = (pw) => {
+    let score = 0;
+    if (pw.length >= 6) score++;
+    if (pw.length >= 10) score++;
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+    if (/\d/.test(pw) && /[^A-Za-z0-9]/.test(pw)) score++;
+    return pw ? Math.max(1, score) : 0;
+  };
+  function checkMatch() {
+    const pw = $('login-password').value, cf = $('login-confirm').value;
+    const sc = strength(pw);
+    const meter = $('pw-strength');
+    meter.dataset.score = sc;
+    meter.querySelector('span').textContent = ['', 'Weak', 'Okay', 'Good', 'Strong'][sc];
+    const m = $('pw-match');
+    if (mode !== 'signup' || !cf) { m.textContent = ''; m.className = 'pw-match small'; return true; }
+    const ok = pw === cf;
+    m.textContent = ok ? '✓ Passwords match' : '✗ Passwords do not match';
+    m.className = `pw-match small ${ok ? 'ok' : 'bad'}`;
+    return ok;
+  }
+  $('login-password').addEventListener('input', checkMatch);
+  $('login-confirm').addEventListener('input', checkMatch);
 
   const busy = (on) => {
     for (const b of document.querySelectorAll('#login-form button')) b.disabled = on;
+    $('btn-submit').classList.toggle('loading', on);
   };
   const credentials = () => ({ email: $('login-email').value.trim(), password: $('login-password').value });
 
-  $('login-form').onsubmit = async (e) => {
+  card.onsubmit = async (e) => {
     e.preventDefault();
+    const { email, password } = credentials();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return say('Please enter a valid email address.', true);
+    if (password.length < 6) return say('The password needs at least 6 characters.', true);
+    if (mode === 'signup') {
+      if (!$('login-confirm').value) return say('Please type the password again to confirm it.', true);
+      if (!checkMatch()) return say('The two passwords are not the same.', true);
+    }
     busy(true);
-    say('Signing in…');
-    const { error } = await supabase.auth.signInWithPassword(credentials());
+    say(mode === 'signup' ? 'Creating your account…' : 'Signing in…');
+    if (mode === 'signup') {
+      const { data, error } = await supabase.auth.signUp({
+        email, password,
+        options: { emailRedirectTo: isWeb ? oauthRedirectUrl() : undefined },
+      });
+      busy(false);
+      if (error) return say(error.message, true);
+      if (data.session) { card.classList.add('success'); return setTimeout(() => location.reload(), 350); }
+      say('Check your email to confirm your account, then sign in.');
+      setMode('signin');
+      return;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
     busy(false);
-    if (error) return say(error.message, true);
-    location.reload();
+    if (error) return say(/invalid login/i.test(error.message) ? 'Wrong email or password.' : error.message, true);
+    card.classList.add('success');
+    setTimeout(() => location.reload(), 350);
   };
 
-  $('btn-signup').onclick = async () => {
-    if (!$('login-form').reportValidity()) return;
+  $('btn-forgot').onclick = async () => {
+    const email = $('login-email').value.trim();
+    if (!/^\S+@\S+\.\S+$/.test(email)) return say('Type your email above first, then press "Forgot password?".', true);
     busy(true);
-    say('Creating account…');
-    const { data, error } = await supabase.auth.signUp({
-      ...credentials(),
-      options: { emailRedirectTo: isWeb ? oauthRedirectUrl() : undefined },
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: isWeb ? oauthRedirectUrl() : 'https://towfiqbinhasan.github.io/E-Notes/',
     });
     busy(false);
     if (error) return say(error.message, true);
-    if (data.session) location.reload();
-    else say('Check your email to confirm your account, then sign in.');
+    say('We sent you an email with a link to set a new password.');
   };
 
   $('btn-google').onclick = async () => {
@@ -101,6 +177,28 @@ function showLogin() {
     location.reload();
   };
 }
+
+// After a "Forgot password" email link, Supabase signs the user in for a password change.
+function listenForPasswordRecovery() {
+  if (!supabase) return;
+  supabase.auth.onAuthStateChange((event) => {
+    if (event !== 'PASSWORD_RECOVERY') return;
+    const dlg = $('reset-dialog');
+    const note = $('reset-message');
+    dlg.showModal();
+    $('reset-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const pw = $('reset-password').value, cf = $('reset-confirm').value;
+      if (pw.length < 6) { note.textContent = 'At least 6 characters.'; note.className = 'pw-match small bad'; return; }
+      if (pw !== cf) { note.textContent = 'The two passwords are not the same.'; note.className = 'pw-match small bad'; return; }
+      const { error } = await supabase.auth.updateUser({ password: pw });
+      if (error) { note.textContent = error.message; note.className = 'pw-match small bad'; return; }
+      dlg.close();
+      toast('Password changed ✓');
+    };
+  });
+}
+listenForPasswordRecovery();
 
 async function showGoogleIfEnabled() {
   if (!isConfigured) return;

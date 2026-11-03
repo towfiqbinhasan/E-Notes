@@ -353,6 +353,19 @@ stored in the `strokes` array as items with `"t": "text"`.
   blank sheet, change the margin, or delete it. The "3 / 12" button at the
   bottom right jumps to any sheet.
 
+### Find in PDF
+
+Press **Ctrl+F** (or the 🔍 button) and type a word or sentence. E-Notes searches
+the printed text of every PDF page in the notebook and your typed text boxes,
+marks every match, and **Enter / Shift+Enter** (or ▲ ▼) jump between them.
+Scanned PDFs (pictures without a text layer) cannot be searched.
+
+### Accounts
+
+Sign in or **Create account** (with password confirmation and a strength
+meter). **Forgot password?** sends an email with a link that opens E-Notes on
+the web, where you set a new password.
+
 ### Shortcuts
 
 | Key | Action |
@@ -363,6 +376,7 @@ stored in the `strokes` array as items with `"t": "text"`.
 | Ctrl+C / X / V / D, Delete | copy / cut / paste / duplicate / delete the selection |
 | Esc | clear the selection, close menus |
 | Ctrl + mouse wheel, Ctrl +/−/0 | zoom in / out / fit width |
+| Ctrl+F | find in PDF and notes |
 | Ctrl+O, Ctrl+E, Ctrl+B | add PDF, export, toggle sidebar |
 
 ### Troubleshooting

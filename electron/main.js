@@ -148,6 +148,7 @@ function buildMenu() {
         // registerAccelerator:false -> shortcut is shown but handled by the page (keeps text-box undo working)
         { label: 'Undo', accelerator: 'CmdOrCtrl+Z', registerAccelerator: false, click: send('undo') },
         { label: 'Redo', accelerator: 'CmdOrCtrl+Y', registerAccelerator: false, click: send('redo') },
+        { label: 'Find in PDF…', accelerator: 'CmdOrCtrl+F', registerAccelerator: false, click: send('find') },
         { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
       ],

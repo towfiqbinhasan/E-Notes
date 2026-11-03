@@ -19,32 +19,94 @@
 
     <!-- Login -->
     <section id="login" class="login" hidden>
-      <form id="login-form" class="login-card" autocomplete="on">
-        <img src="./icons/icon-192.png" alt="" class="login-logo" width="64" height="64" />
-        <h1>E-Notes</h1>
-        <p class="muted">Write by hand next to your PDFs.<br />Live on every device, even offline.</p>
-        <div id="login-config-warning" class="notice" hidden>
-          Supabase is not configured yet. Copy <code>.env.example</code> to <code>.env</code>, fill in your keys and restart.
-          You can still use E-Notes on this device only.
-        </div>
-        <div id="login-fields">
-          <label>Email <input id="login-email" type="email" autocomplete="email" required /></label>
-          <label>Password <input id="login-password" type="password" autocomplete="current-password" minlength="6" required /></label>
-          <div class="row">
-            <button type="submit" class="btn primary" id="btn-signin">Sign in</button>
-            <button type="button" class="btn" id="btn-signup">Create account</button>
+      <div class="login-bg" aria-hidden="true">
+        <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+        <div class="login-dots"></div>
+      </div>
+      <div class="login-shell">
+        <aside class="login-hero" aria-hidden="true">
+          <div class="hero-brand"><img src="./icons/icon-192.png" alt="" width="44" height="44" /><b>E-Notes</b></div>
+          <h2>Your PDFs.<br /><span>Your handwriting.</span><br />Every device.</h2>
+          <svg class="hero-page" viewBox="0 0 320 210">
+            <rect x="1" y="1" width="318" height="208" rx="14" class="hp-card"/>
+            <rect x="18" y="20" width="160" height="170" rx="6" class="hp-pdf"/>
+            <rect x="32" y="40" width="110" height="10" rx="3" class="hp-title"/>
+            <rect x="32" y="64" width="128" height="6" rx="3" class="hp-line"/><rect x="32" y="78" width="118" height="6" rx="3" class="hp-line"/>
+            <rect x="30" y="90" width="96" height="14" rx="2" class="hp-hl"/>
+            <rect x="32" y="94" width="124" height="6" rx="3" class="hp-line"/><rect x="32" y="110" width="100" height="6" rx="3" class="hp-line"/>
+            <rect x="32" y="124" width="122" height="6" rx="3" class="hp-line"/><rect x="32" y="138" width="90" height="6" rx="3" class="hp-line"/>
+            <path class="hp-ink" d="M200 52c14-10 30 6 18 16s-20 2-6-6 34-12 46 2M200 92c20-6 40-6 74 0M204 112c14 10 30 10 44 0s24-8 34 4M200 150l18 18 40-44"/>
+          </svg>
+          <ul class="hero-points">
+            <li><i>✍️</i> Write with S Pen, stylus or mouse</li>
+            <li><i>⚡</i> Live sync: Windows, Linux, Android & web</li>
+            <li><i>✨</i> Free AI helper for every page</li>
+          </ul>
+        </aside>
+
+        <form id="login-form" class="login-card" autocomplete="on" novalidate>
+          <img src="./icons/icon-192.png" alt="" class="login-logo" width="64" height="64" />
+          <h1>E-Notes</h1>
+          <p class="muted login-sub" id="login-sub">Welcome back! Sign in to your notebooks.</p>
+          <div id="login-config-warning" class="notice" hidden>
+            Supabase is not configured yet. Copy <code>.env.example</code> to <code>.env</code>, fill in your keys and restart.
+            You can still use E-Notes on this device only.
           </div>
-          <div class="divider" id="google-divider" hidden><span>or</span></div>
-          <button type="button" class="btn google" id="btn-google" hidden>
-            <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
-            Sign in with Google
-          </button>
-        </div>
-        <p id="login-message" class="login-message" role="status"></p>
-        <button type="button" class="link" id="btn-local">Use without an account (this device only)</button>
-        <p class="credit">Created by <b>Md. Towfiq Bin Hasan</b> and <b>TH team</b></p>
-      </form>
+          <div id="login-fields">
+            <div class="auth-tabs" role="tablist">
+              <button type="button" class="auth-tab active" data-mode="signin" role="tab">Sign in</button>
+              <button type="button" class="auth-tab" data-mode="signup" role="tab">Create account</button>
+              <span class="auth-indicator"></span>
+            </div>
+            <label class="field">
+              <span>Email</span>
+              <input id="login-email" type="email" autocomplete="email" placeholder="you@example.com" required />
+            </label>
+            <label class="field">
+              <span>Password</span>
+              <span class="pw">
+                <input id="login-password" type="password" autocomplete="current-password" placeholder="At least 6 characters" minlength="6" required />
+                <button type="button" class="pw-toggle" data-for="login-password" title="Show password"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </span>
+            </label>
+            <div class="collapsible" id="signup-extra">
+              <div>
+                <div class="strength" id="pw-strength"><i></i><i></i><i></i><i></i><span></span></div>
+                <label class="field">
+                  <span>Confirm password</span>
+                  <span class="pw">
+                    <input id="login-confirm" type="password" autocomplete="new-password" placeholder="Type the password again" />
+                    <button type="button" class="pw-toggle" data-for="login-confirm" title="Show password"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                  </span>
+                </label>
+                <p class="pw-match small" id="pw-match"></p>
+              </div>
+            </div>
+            <div class="row end forgot-row" id="forgot-row"><button type="button" class="link small" id="btn-forgot">Forgot password?</button></div>
+            <button type="submit" class="btn primary block submit" id="btn-submit"><span class="label">Sign in</span><span class="btn-spinner"></span></button>
+            <div class="divider" id="google-divider" hidden><span>or</span></div>
+            <button type="button" class="btn google" id="btn-google" hidden>
+              <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.2l7.8 6.1C12.3 13.6 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.3.8-4.7l-7.8-6.1C.9 16.5 0 20.1 0 24s.9 7.5 2.6 10.8l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.9 2.3-8.4 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+              Continue with Google
+            </button>
+          </div>
+          <p id="login-message" class="login-message" role="status"></p>
+          <button type="button" class="link" id="btn-local">Use without an account (this device only)</button>
+          <p class="credit">Created by <b>Md. Towfiq Bin Hasan</b> and <b>TH team</b></p>
+        </form>
+      </div>
     </section>
+
+    <!-- New password (after a "Forgot password" e-mail link) -->
+    <dialog id="reset-dialog" class="dialog">
+      <form id="reset-form" method="dialog">
+        <h2>Set a new password</h2>
+        <label class="field"><span>New password</span><input id="reset-password" type="password" minlength="6" autocomplete="new-password" required /></label>
+        <label class="field"><span>Confirm new password</span><input id="reset-confirm" type="password" minlength="6" autocomplete="new-password" required /></label>
+        <p class="pw-match small" id="reset-message"></p>
+        <div class="row end"><button class="btn primary" id="reset-save" value="save">Save password</button></div>
+      </form>
+    </dialog>
 
     <!-- App -->
     <div id="app" class="app" hidden>
@@ -62,7 +124,11 @@
         <button class="btn primary new-notebook" id="btn-new-notebook">+ New notebook</button>
         <div class="sidebar-foot">
           <div class="account">
-            <span id="account-email" class="muted ellipsis"></span>
+            <span id="account-avatar" class="avatar"></span>
+            <div class="account-text">
+              <b id="account-name" class="ellipsis"></b>
+              <span id="account-email" class="muted small ellipsis"></span>
+            </div>
           </div>
           <div class="row">
             <button class="btn small" id="btn-settings">Settings</button>
@@ -81,6 +147,7 @@
             <button class="icon-btn" id="btn-add-pdf" title="Add PDF (Ctrl+O)"></button>
             <button class="icon-btn" id="btn-add-sheet" title="Add blank sheet"></button>
             <button class="icon-btn" id="btn-export" title="Export PDF (Ctrl+E)"></button>
+            <button class="icon-btn" id="btn-find" title="Find in PDF and notes (Ctrl+F)"></button>
             <button class="icon-btn ai-btn" id="btn-ai" title="AI helper (free)"></button>
             <button class="icon-btn" id="btn-theme" title="Light / dark"></button>
           </div>
@@ -108,6 +175,14 @@
           </div>
         </header>
 
+        <div id="find-bar" class="find-bar" hidden role="search">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="find-input" type="search" placeholder="Find a word or sentence in your PDFs…" autocomplete="off" spellcheck="false" />
+          <span id="find-count" class="find-count"></span>
+          <button class="icon-btn" id="find-prev" title="Previous (Shift+Enter)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg></button>
+          <button class="icon-btn" id="find-next" title="Next (Enter)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <button class="icon-btn" id="find-close" title="Close (Esc)">✕</button>
+        </div>
         <div id="viewport" class="viewport">
           <div id="sheets" class="sheets"></div>
           <div id="empty" class="empty" hidden>

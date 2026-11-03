@@ -440,6 +440,26 @@ export class SheetView {
     }
   }
 
+  /** Marks for "find in PDF": [{x, y, w, h, current}] in sheet units. */
+  setSearchMarks(marks) {
+    if (!this.findLayer) {
+      if (!marks.length) return;
+      this.findLayer = document.createElement('div');
+      this.findLayer.className = 'find-layer';
+      this.el.insertBefore(this.findLayer, this.textLayer);
+    }
+    this.findLayer.textContent = '';
+    for (const m of marks) {
+      const el = document.createElement('span');
+      el.className = 'find-mark' + (m.current ? ' current' : '');
+      Object.assign(el.style, {
+        left: `calc(${m.x - 1}px * var(--z))`, top: `calc(${m.y - 1}px * var(--z))`,
+        width: `calc(${m.w + 2}px * var(--z))`, height: `calc(${m.h + 2}px * var(--z))`,
+      });
+      this.findLayer.append(el);
+    }
+  }
+
   /** Show (or finish) a stroke another device is drawing right now. */
   showGhost(item, done) {
     if (item && Array.isArray(item.p) && (item.t === 'pen' || item.t === 'hl')) {

@@ -7,6 +7,7 @@ import { importPdf } from './pdf.js';
 import { exportSheets, safeFileName } from './export.js';
 import { desktop, isElectron, isNative, saveFile, applyNativeTheme, onBackButton } from './platform.js';
 import { initAiPanel } from './ai.js';
+import { initFind } from './find.js';
 import { isConfigured } from './supabase.js';
 
 const $ = (id) => document.getElementById(id);
@@ -30,6 +31,12 @@ const ICONS = {
   cursor: svg('<path d="M5 3l14 7.5-6.2 1.8L10 19z"/><path d="M13 13l5 5"/>'),
   lasso: svg('<path d="M7 17.5C4.6 16.2 3 14.2 3 12c0-4.4 4-8 9-8s9 3.6 9 8-4 8-9 8c-1 0-2-.1-2.9-.4" stroke-dasharray="2.5 2.5"/><path d="M7 17.5c0 1.4-1.1 2.5-2.5 2.5"/><circle cx="8" cy="16" r="2"/>'),
   laser: svg('<circle cx="12" cy="12" r="3" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>'),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
+  book: svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/><path d="M9 7h6"/>'),
+  edit: svg('<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/>'),
+  trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'),
+  gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+  logout: svg('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l5-5-5-5"/><path d="M15 12H4"/>'),
   sparkle: svg('<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'),
 };
 
@@ -145,9 +152,13 @@ export function initUI(opts) {
   $('btn-redo').innerHTML = ICONS.redo;
   $('btn-cursor').innerHTML = ICONS.cursor;
   $('btn-ai').innerHTML = ICONS.sparkle;
+  $('btn-find').innerHTML = ICONS.search;
+  $('btn-settings').innerHTML = `${ICONS.gear}<span>Settings</span>`;
   for (const b of document.querySelectorAll('.tool')) b.innerHTML = ICONS[b.dataset.tool];
-  $('account-email').textContent = localMode ? 'This device only (no account)' : user.email || '';
-  $('btn-signout').textContent = localMode ? 'Sign in' : 'Sign out';
+  $('account-email').textContent = localMode ? 'This device only' : user.email || '';
+  $('account-name').textContent = localMode ? 'Offline notebook' : (user.email || '').split('@')[0];
+  $('account-avatar').textContent = localMode ? '•' : (user.email || '?').charAt(0).toUpperCase();
+  $('btn-signout').innerHTML = `${ICONS.logout}<span>${localMode ? 'Sign in' : 'Sign out'}</span>`;
   // A build without sync has no account to sign in to.
   $('btn-signout').hidden = localMode && !isConfigured;
   applyTheme();
@@ -170,9 +181,9 @@ export function initUI(opts) {
     for (const nb of store.listNotebooks()) {
       const item = document.createElement('div');
       item.className = 'nb-item' + (nb.id === current ? ' active' : '');
-      item.innerHTML = `<span class="name"></span><span class="nb-actions">
-        <button class="icon-btn" data-act="rename" title="Rename">✎</button>
-        <button class="icon-btn" data-act="delete" title="Delete">🗑</button></span>`;
+      item.innerHTML = `<span class="nb-icon">${ICONS.book}</span><span class="name"></span><span class="nb-actions">
+        <button class="icon-btn" data-act="rename" title="Rename">${ICONS.edit}</button>
+        <button class="icon-btn" data-act="delete" title="Delete">${ICONS.trash}</button></span>`;
       item.querySelector('.name').textContent = nb.title || 'Untitled';
       item.onclick = (e) => {
         const act = e.target.closest('[data-act]')?.dataset.act;
@@ -302,6 +313,9 @@ export function initUI(opts) {
     viewport.scrollTop = 0;
     renderNotebookList();
     renderSheets();
+    // Gentle fade when switching notebooks.
+    sheetsEl.classList.remove('switching'); void sheetsEl.offsetWidth; sheetsEl.classList.add('switching');
+    find.refresh();
   }
 
   function onSheetMenu(view, anchor) { openSheetMenu(view, anchor); }
@@ -371,6 +385,21 @@ export function initUI(opts) {
     const v = views.get(id);
     if (v) viewport.scrollTop += v.el.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 16;
   }
+  /** Scroll so that height `y` (sheet units) of a sheet sits in the upper part of the screen. */
+  function scrollToY(id, y) {
+    const v = views.get(id);
+    if (!v) return;
+    const target = v.el.getBoundingClientRect().top - viewport.getBoundingClientRect().top + y * v.zoom - viewport.clientHeight * 0.35;
+    viewport.scrollTo({ top: viewport.scrollTop + target, behavior: Math.abs(target) < viewport.clientHeight * 2 ? 'smooth' : 'auto' });
+  }
+
+  // ----- find in PDF (Ctrl+F) -----
+  const find = initFind({
+    getSheets: () => store.listSheets(),
+    getView: (id) => views.get(id),
+    scrollToY,
+    onOpenChange: (open) => $('btn-find').classList.toggle('active', open),
+  });
 
   // ----- page number ("3 / 12") and go to sheet -----
   const pill = $('page-pill');
@@ -846,7 +875,7 @@ export function initUI(opts) {
     }
   });
   store.events.addEventListener('sheets', (e) => {
-    if (e.detail.notebookId === store.currentNotebook()) renderSheets();
+    if (e.detail.notebookId === store.currentNotebook()) { renderSheets(); find.refresh(); }
   });
   store.events.addEventListener('sheet', (e) => {
     const v = views.get(e.detail.sheet.id);
@@ -867,6 +896,7 @@ export function initUI(opts) {
     'zoom-reset': zoomReset,
     'toggle-sidebar': () => toggleSidebar(),
     'toggle-theme': () => $('btn-theme').click(),
+    find: () => find.open(),
     'tool:pen': () => setTool('pen'),
     'tool:highlighter': () => setTool('highlighter'),
     'tool:eraser': () => setTool('eraser'),
@@ -891,6 +921,7 @@ export function initUI(opts) {
     if (mod) {
       if (k === 'z') cmd = e.shiftKey ? 'redo' : 'undo';
       else if (k === 'y') cmd = 'redo';
+      else if (k === 'f') cmd = 'find';
       else if (k === 'c' && input.hasSelection()) cmd = 'copy';
       else if (k === 'x' && input.hasSelection()) cmd = 'cut';
       else if (k === 'd' && input.hasSelection()) cmd = 'duplicate';
@@ -930,6 +961,7 @@ export function initUI(opts) {
     if (!menu.hidden) { closeMenu(); return true; }
     if (presets.isOpen()) { presets.close(); return true; }
     if (input.hasSelection()) { input.clearSelection(); return true; }
+    if (find.isOpen()) { find.close(); return true; }
     if (aiPanel.isOpen()) { aiPanel.toggle(false); return true; }
     if (app.classList.contains('sidebar-open')) { toggleSidebar(false); return true; }
     return false;
