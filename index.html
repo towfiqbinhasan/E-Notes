@@ -196,6 +196,10 @@
           </form>
           <div class="ai-foot">
             <span id="ai-key-status" class="muted small"></span>
+            <select id="ai-order" class="ai-order" hidden title="Which AI answers first">
+              <option value="fast">⚡ Fastest first (Groq)</option>
+              <option value="best">★ Best first (Gemini)</option>
+            </select>
             <button type="button" class="link small" id="ai-keys-manage" hidden>Manage keys</button>
           </div>
           <p class="muted small ai-note">Free AI keys: the provider may use what you send to improve its models. Keep very private notes out.</p>

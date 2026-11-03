@@ -17,9 +17,9 @@ const AI_TEXT = { color: '#1d4ed8', size: 18 };
 // =====================================================================
 
 /** Picture of a sheet (PDF page + ink + text) as base64 JPEG, ~1200 px wide. */
-async function sheetPicture(sheet, width = 1200) {
+async function sheetPicture(sheet, width = 1000) {
   const canvas = await sheetCanvas(sheet, width);
-  const out = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  const out = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
   canvas.width = canvas.height = 0;
   return out;
 }
@@ -178,8 +178,9 @@ const GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
 const SYSTEM =
   'You are the study assistant inside E-Notes, a handwriting notebook app. The user shares a picture of one ' +
   'notebook sheet: usually a PDF page on one side and their handwritten notes in the margin, or a blank page with ' +
-  'handwriting. Reply in the language the user writes in (Bengali, English or Banglish). Keep answers concise and ' +
-  'in plain text without Markdown headings, tables or bold markers, because the answer may be placed on the sheet ' +
+  'handwriting. Reply in the language the user writes in (Bengali, English or Banglish). Answer briefly (a few ' +
+  'short lines) unless the user asks for more detail. ' +
+  'Use plain text without Markdown headings, tables or bold markers, because the answer may be placed on the sheet ' +
   "as a text box. Simple '-' bullet lines are fine.";
 
 const PROMPTS = {
@@ -229,58 +230,96 @@ async function pickModels(key) {
 }
 const pickModel = async (key) => (await pickModels(key))[0];
 
-const plain = (t) => t.replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^\s*\*\s+/gm, '- ').trim();
+const plain = (t) => t
+  .replace(/<think>[\s\S]*?(<\/think>|$)/g, '')       // hidden reasoning some models print
+  .replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^\s*\*\s+/gm, '- ').trim();
+
+/** Read a server-sent-events stream and call onData(json) for every "data:" line. */
+async function readSSE(res, onData) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      try { onData(JSON.parse(data)); } catch { /* keep-alive or partial line */ }
+    }
+  }
+}
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const geminiNoThinkingCfg = new Set(); // models that refuse "thinking off"
+
 /**
- * Ask Gemini. When a model is overloaded (503) or its free quota is used up (429),
- * wait a moment and retry, then fall back to the next model. onStatus(text) shows progress.
+ * Ask Gemini and stream the answer (onText(textSoFar) is called as words arrive).
+ * When a model is overloaded (503) or its free quota is used up (429), wait a moment and retry,
+ * then fall back to the next model. onStatus(text) shows progress.
  */
-async function askGemini(key, { prompt, image, history }, onStatus = () => {}) {
+async function askGemini(key, { prompt, image, history }, onStatus = () => {}, onText = () => {}) {
   const models = await pickModels(key);
   const turns = [...history, { role: 'user', content: prompt }];
   const contents = turns.map((t, i) => ({
     role: t.role === 'assistant' ? 'model' : 'user',
     parts: i === 0 ? [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text: t.content }] : [{ text: t.content }],
   }));
-  const body = JSON.stringify({
-    systemInstruction: { parts: [{ text: SYSTEM }] },
-    contents,
-    generationConfig: { maxOutputTokens: 8192, temperature: 0.4 },
-  });
-  let res = null, lastError = null;
+  const bodyFor = (model) => {
+    const generationConfig = { maxOutputTokens: 4096, temperature: 0.4 };
+    // Notes questions don't need long "thinking": switching it off makes answers start much sooner.
+    if (!geminiNoThinkingCfg.has(model)) generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    return JSON.stringify({ systemInstruction: { parts: [{ text: SYSTEM }] }, contents, generationConfig });
+  };
+  let res = null, lastError = null, used = null;
   outer: for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(`${GEMINI}/models/${model}:streamGenerateContent?alt=sse`, {
         method: 'POST',
         headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-        body,
+        body: bodyFor(model),
       });
-      if (res.ok) {
-        // Remember the model that answered so the next question starts there.
-        modelCache = [model, ...models.filter((m) => m !== model)];
-        break outer;
-      }
+      if (res.ok) { used = model; break outer; }
       const busy = res.status >= 500;
       const quota = res.status === 429;
-      if (res.status === 404) { modelCache = null; } // model retired: re-read the list next time
-      if (!busy && !quota && res.status !== 404) throw await geminiError(res);
       lastError = await geminiError(res);
-      if (busy && attempt === 0) { onStatus('Gemini is busy, trying again…'); await pause(1500); continue; }
+      if (res.status === 400 && /think/i.test(lastError.message) && !geminiNoThinkingCfg.has(model)) {
+        geminiNoThinkingCfg.add(model); // this model always thinks: ask again without the setting
+        continue;
+      }
+      if (res.status === 404) { modelCache = null; } // model retired: re-read the list next time
+      if (!busy && !quota && res.status !== 404) throw lastError;
+      if (busy && attempt === 0) { onStatus('Gemini is busy, trying again…'); await pause(1200); continue; }
       onStatus('Trying another Gemini model…');
       break; // next model
     }
     res = null;
   }
   if (!res) throw lastError || new Error('Gemini did not answer. Please try again.');
-  const data = await res.json();
-  const cand = data.candidates && data.candidates[0];
-  if (!cand) {
-    const why = data.promptFeedback && data.promptFeedback.blockReason;
-    throw new Error(why ? `Gemini did not answer this request (${why}).` : 'Gemini returned no answer.');
+  // Remember the model that answered so the next question starts there.
+  modelCache = [used, ...models.filter((m) => m !== used)];
+
+  let text = '', finish = null, blocked = null;
+  try {
+    await readSSE(res, (d) => {
+      if (d.promptFeedback && d.promptFeedback.blockReason) blocked = d.promptFeedback.blockReason;
+      const c = d.candidates && d.candidates[0];
+      if (!c) return;
+      for (const p of (c.content && c.content.parts) || []) {
+        if (p.text && !p.thought) { text += p.text; onText(plain(text)); }
+      }
+      if (c.finishReason) finish = c.finishReason;
+    });
+  } catch (err) {
+    if (!text) throw err; // connection dropped before anything arrived
   }
-  const text = ((cand.content && cand.content.parts) || []).filter((p) => p.text && !p.thought).map((p) => p.text).join('');
-  return { text: plain(text) || '(no answer)', truncated: cand.finishReason === 'MAX_TOKENS', provider: 'Gemini' };
+  if (!text) throw new Error(blocked ? `Gemini did not answer this request (${blocked}).` : 'Gemini returned no answer.');
+  return { text: plain(text), truncated: finish === 'MAX_TOKENS', provider: 'Gemini' };
 }
 
 // =====================================================================
@@ -319,7 +358,7 @@ async function pickGroqModels(key) {
   return groqModels;
 }
 
-async function askGroq(key, { prompt, image, pageText, history }, onStatus = () => {}) {
+async function askGroq(key, { prompt, image, pageText, history }, onStatus = () => {}, onText = () => {}) {
   const models = (await pickGroqModels(key)).slice(0, 4);
   const send = (model, withImage) => {
     const turns = [...history, { role: 'user', content: prompt }];
@@ -336,7 +375,7 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
     return fetch(`${GROQ}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, temperature: 0.4, max_completion_tokens: 4096 }),
+      body: JSON.stringify({ model, messages, temperature: 0.4, max_completion_tokens: 2048, stream: true }),
     });
   };
   let lastError = null;
@@ -347,10 +386,18 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
       if (withImage === groqTextOnly.has(m)) continue;
       const res = await send(m, withImage);
       if (res.ok) {
-        const data = await res.json();
-        const c = data.choices && data.choices[0];
-        const out = (c && c.message && c.message.content) || '';
-        return { text: plain(out) || '(no answer)', truncated: !!c && c.finish_reason === 'length', provider: 'Groq' };
+        let out = '', finish = null;
+        try {
+          await readSSE(res, (d) => {
+            const c = d.choices && d.choices[0];
+            if (!c) return;
+            if (c.delta && c.delta.content) { out += c.delta.content; onText(plain(out)); }
+            if (c.finish_reason) finish = c.finish_reason;
+          });
+        } catch (err) {
+          if (!out) throw err;
+        }
+        return { text: plain(out) || '(no answer)', truncated: finish === 'length', provider: 'Groq' };
       }
       lastError = await groqError(res);
       if (withImage && res.status === 400) { groqTextOnly.add(m); continue; } // no pictures: use it text-only later
@@ -453,12 +500,26 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
   let busy = false;
   let managing = false;      // "Manage keys" open
   let attached = null;       // picture the user attached / pasted / snipped: base64 JPEG
+  let aiOrder = 'fast';      // 'fast' = Groq first, 'best' = Gemini first
+  const pictureCache = new Map(); // sheet id -> {stamp, b64}: unchanged sheets are not re-rendered
+
+  async function cachedSheetPicture(sheet) {
+    const stamp = `${sheet.updated_at}|${sheet.strokes.length}`;
+    const hit = pictureCache.get(sheet.id);
+    if (hit && hit.stamp === stamp) return hit.b64;
+    const b64 = await sheetPicture(sheet);
+    pictureCache.set(sheet.id, { stamp, b64 });
+    if (pictureCache.size > 8) pictureCache.delete(pictureCache.keys().next().value);
+    return b64;
+  }
 
   // ----- keys -----
   const hasAi = () => !!(keys.gemini || keys.groq);
   async function loadKeys() {
     keys.gemini = (await getDeviceSetting('geminiKey')) || null;
     keys.groq = (await getDeviceSetting('groqKey')) || null;
+    aiOrder = (await getDeviceSetting('aiOrder')) || 'fast';
+    $('ai-order').value = aiOrder;
     renderKeyState();
   }
   function renderKeyState() {
@@ -474,6 +535,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     const saved = ['gemini', 'groq'].filter((p) => keys[p]).map((p) => LABEL[p]);
     $('ai-key-status').textContent = saved.length ? `AI: ${saved.join(' + ')}` : 'No AI key on this device yet';
     $('ai-keys-manage').hidden = !hasAi();
+    $('ai-order').hidden = !(keys.gemini && keys.groq); // the choice matters only with both keys
     $('ai-keys-manage').textContent = managing ? 'Done' : 'Manage keys';
   }
   const CHECK = {
@@ -521,6 +583,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     };
   }
   $('ai-keys-manage').onclick = () => { managing = !managing; renderKeyState(); };
+  $('ai-order').onchange = async (e) => { aiOrder = e.target.value; await setDeviceSetting('aiOrder', aiOrder); };
 
   // ----- chat log -----
   function refreshHeader() {
@@ -651,18 +714,26 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     const waiting = bubble('assistant', pic ? 'Looking at the picture…' : 'Reading the sheet…', 'waiting');
     const status = (msg) => { waiting.querySelector('.ai-text').textContent = msg; };
     try {
-      const image = pic || await sheetPicture(sheet);
+      const image = pic || await cachedSheetPicture(sheet);
       const pageText = pic ? null : await sheetText(sheet); // null: a picture-only question
       let prompt = action === 'ask' ? question : PROMPTS[action];
       if (pic && action !== 'ask') prompt = prompt.replace(/this sheet|this page|the page|my notes/gi, 'this picture');
-      const order = ['gemini', 'groq'].filter((p) => keys[p]);
+      // "Fastest": Groq first (answers in about a second). "Best": Gemini first (better with Bangla handwriting).
+      const order = (aiOrder === 'best' ? ['gemini', 'groq'] : ['groq', 'gemini']).filter((p) => keys[p]);
+      // Show the answer while it is being written.
+      const onText = (t) => {
+        if (waiting.classList.contains('waiting')) waiting.classList.remove('waiting');
+        waiting.querySelector('.ai-text').textContent = t;
+        const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+        if (nearBottom) log.scrollTop = log.scrollHeight;
+      };
       let res = null, lastError = null;
       for (let i = 0; i < order.length && !res; i++) {
         const p = order[i];
         try {
           res = p === 'gemini'
-            ? await askGemini(keys.gemini, { prompt, image, history }, status)
-            : await askGroq(keys.groq, { prompt, image, pageText, history }, status);
+            ? await askGemini(keys.gemini, { prompt, image, history }, status, onText)
+            : await askGroq(keys.groq, { prompt, image, pageText, history }, status, onText);
         } catch (err) {
           lastError = err;
           if (i < order.length - 1) status(`${LABEL[p]} did not answer, asking ${LABEL[order[i + 1]]}…`);
@@ -674,9 +745,10 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
         }
         throw lastError || new Error('The AI did not answer. Please try again.');
       }
-      waiting.remove();
-      const el = bubble('assistant', res.text);
-      answerButtons(el, res.text, sheet, res.provider);
+      // The streamed bubble becomes the final answer.
+      waiting.classList.remove('waiting');
+      waiting.querySelector('.ai-text').textContent = res.text;
+      answerButtons(waiting, res.text, sheet, res.provider);
       if (res.truncated) bubble('assistant', 'The answer was cut off because it was very long.', 'note');
       history.push({ role: 'user', content: prompt }, { role: 'assistant', content: res.text });
       history = history.slice(-12);

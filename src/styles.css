@@ -636,3 +636,4 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   background: rgba(23, 26, 38, 0.92); color: #fff; padding: 9px 16px; border-radius: 99px; font-size: 13px; font-weight: 500;
 }
 .snip-rect { position: fixed; z-index: 61; border: 2px dashed #fff; border-radius: 4px; box-shadow: 0 0 0 9999px rgba(8, 10, 20, 0.4); pointer-events: none; }
+.ai-order { font-size: 12px; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); margin-left: auto; }
