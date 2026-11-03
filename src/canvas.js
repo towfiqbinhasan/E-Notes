@@ -398,13 +398,21 @@ export class SheetView {
       this.imgWidth = want;
       this.img.src = this.imgUrl;
       this.pdfBox.classList.remove('loading', 'missing');
+      this.retryDelay = 0;
     } catch (err) {
       console.warn('PDF page render failed', err);
       if (token !== this.loadToken) return;
       this.pdfBox.classList.remove('loading');
       this.pdfBox.classList.add('missing');
-      this.pdfBox.dataset.msg = navigator.onLine ? 'Could not load this PDF page' : 'PDF page not downloaded yet — connect to the internet';
-      if (!navigator.onLine) window.addEventListener('online', () => this.loadPdf(), { once: true });
+      if (!navigator.onLine) {
+        this.pdfBox.dataset.msg = 'PDF page not downloaded yet — connect to the internet';
+        window.addEventListener('online', () => this.loadPdf(), { once: true });
+        return;
+      }
+      // The PDF may still be uploading from another device: keep trying while the page is shown.
+      this.pdfBox.dataset.msg = 'Could not load this PDF page — trying again…';
+      this.retryDelay = Math.min((this.retryDelay || 2500) * 2, 120000);
+      setTimeout(() => { if (token === this.loadToken && this.active) this.loadPdf(); }, this.retryDelay);
     }
   }
 
