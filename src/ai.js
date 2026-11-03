@@ -11,7 +11,6 @@ import { isNative, openExternal } from './platform.js';
 
 const $ = (id) => document.getElementById(id);
 const AI_TEXT = { color: '#1d4ed8', size: 18 };
-const KEY_PAGE = 'https://aistudio.google.com/apikey';
 
 // =====================================================================
 // Sheet content
@@ -166,8 +165,8 @@ async function geminiError(res) {
   try { const b = await res.json(); if (b && b.error && b.error.message) msg = b.error.message; } catch { /* keep */ }
   if (res.status === 400 && /api key/i.test(msg)) return new Error('This Gemini API key is not valid. Paste a new one in the AI panel.');
   if (res.status === 403) return new Error('This Gemini key is not allowed. Create a new key at aistudio.google.com/apikey.');
-  if (res.status === 429) return new Error('The free Gemini limit is used up for now. Wait a minute (or until tomorrow) and try again.');
-  if (res.status >= 500) return new Error('Gemini is very busy right now. Please try again in a minute.');
+  if (res.status === 429) return Object.assign(new Error('The free Gemini limit is used up for now. Wait a minute (or until tomorrow) and try again.'), { retryable: true });
+  if (res.status >= 500) return Object.assign(new Error('Gemini is very busy right now. Please try again in a minute.'), { retryable: true });
   return new Error(msg);
 }
 
@@ -245,7 +244,101 @@ async function askGemini(key, { prompt, image, history }, onStatus = () => {}) {
     throw new Error(why ? `Gemini did not answer this request (${why}).` : 'Gemini returned no answer.');
   }
   const text = ((cand.content && cand.content.parts) || []).filter((p) => p.text && !p.thought).map((p) => p.text).join('');
-  return { text: plain(text) || '(no answer)', truncated: cand.finishReason === 'MAX_TOKENS' };
+  return { text: plain(text) || '(no answer)', truncated: cand.finishReason === 'MAX_TOKENS', provider: 'Gemini' };
+}
+
+// =====================================================================
+// Groq (second free provider: free key at console.groq.com, very fast)
+// =====================================================================
+
+const GROQ = 'https://api.groq.com/openai/v1';
+let groqModels = null; // { vision: [...], text: [...] }
+
+async function groqError(res) {
+  let msg = `Groq error ${res.status}`;
+  try { const b = await res.json(); if (b && b.error && b.error.message) msg = b.error.message; } catch { /* keep */ }
+  if (res.status === 401) return new Error('This Groq API key is not valid. Paste a new one in the AI panel.');
+  if (res.status === 429) return Object.assign(new Error('The free Groq limit is used up for now. Try again in a minute.'), { retryable: true });
+  if (res.status >= 500) return Object.assign(new Error('Groq is busy right now. Try again in a minute.'), { retryable: true });
+  return Object.assign(new Error(msg), { status: res.status });
+}
+
+/** Groq models this key can use: ones that can see pictures first, then text-only ones. */
+async function pickGroqModels(key) {
+  if (groqModels) return groqModels;
+  const res = await fetch(`${GROQ}/models`, { headers: { Authorization: `Bearer ${key}` } });
+  if (!res.ok) throw await groqError(res);
+  const ids = ((await res.json()).data || [])
+    .filter((m) => m.active !== false)
+    .map((m) => m.id)
+    .filter((id) => !/(whisper|tts|guard|embed|playai|orpheus|compound|distil)/i.test(id));
+  const vision = ids.filter((id) => /llama-4|vision|scout|maverick/i.test(id))
+    .sort((a, b) => (/scout/.test(b) ? 1 : 0) - (/scout/.test(a) ? 1 : 0));
+  const rank = (id) => (/llama-3\.3-70b/.test(id) ? 0 : /gpt-oss-120b/.test(id) ? 1 : /70b|120b|qwen|kimi/.test(id) ? 2 : 3);
+  const text = ids.filter((id) => !vision.includes(id)).sort((a, b) => rank(a) - rank(b));
+  if (!vision.length && !text.length) throw new Error('No Groq model is available for this key.');
+  groqModels = { vision, text };
+  return groqModels;
+}
+
+async function askGroq(key, { prompt, image, pageText, history }, onStatus = () => {}) {
+  const { vision, text } = await pickGroqModels(key);
+  // Picture-reading models first; text-only models get the page's printed text instead.
+  const order = [...vision.slice(0, 2).map((m) => ({ m, img: true })), ...text.slice(0, 2).map((m) => ({ m, img: false }))];
+  let lastError = null;
+  for (const { m, img } of order) {
+    const turns = [...history, { role: 'user', content: prompt }];
+    const messages = [{ role: 'system', content: SYSTEM }, ...turns.map((t, i) => {
+      if (i !== 0) return { role: t.role, content: t.content };
+      if (img) {
+        return { role: 'user', content: [
+          { type: 'text', text: t.content },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${image}` } },
+        ] };
+      }
+      return { role: 'user', content: `${t.content}\n\nText printed on this sheet (handwriting not included):\n${pageText || '(none)'}` };
+    })];
+    const res = await fetch(`${GROQ}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: m, messages, temperature: 0.4, max_completion_tokens: 4096 }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const c = data.choices && data.choices[0];
+      const out = (c && c.message && c.message.content) || '';
+      return { text: plain(out) || '(no answer)', truncated: !!c && c.finish_reason === 'length', provider: 'Groq' };
+    }
+    lastError = await groqError(res);
+    if (res.status === 404) { groqModels = null; continue; }   // model retired
+    if (!lastError.retryable && res.status !== 400) throw lastError; // 400: this model may not take the picture
+    onStatus('Groq is busy, trying another model…');
+  }
+  throw lastError || new Error('Groq did not answer. Please try again.');
+}
+
+// =====================================================================
+// Wikipedia look-up (free, no key)
+// =====================================================================
+
+async function wikiLookup(term) {
+  const lang = isBangla(term) ? 'bn' : 'en';
+  const base = `https://${lang}.wikipedia.org`;
+  const summary = async (title) => {
+    const r = await fetch(`${base}/api/rest_v1/page/summary/${encodeURIComponent(title.trim().replace(/ /g, '_'))}`);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.type === 'disambiguation' || !d.extract ? null : d;
+  };
+  let d = await summary(term);
+  if (!d) {
+    const r = await fetch(`${base}/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(term)}&srlimit=1&format=json&origin=*`);
+    const j = r.ok ? await r.json() : null;
+    const hit = j && j.query && j.query.search && j.query.search[0];
+    if (hit) d = await summary(hit.title);
+  }
+  if (!d) throw new Error(`Nothing found on Wikipedia for “${term}”.`);
+  return { title: d.title, text: d.extract, url: d.content_urls && d.content_urls.desktop && d.content_urls.desktop.page };
 }
 
 // =====================================================================
@@ -308,55 +401,80 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
   const panel = $('ai-panel');
   const log = $('ai-log');
   const input = $('ai-input');
-  let apiKey = null;
-  let history = [];          // [{role, content}] for the current sheet (Gemini chat)
+  const keys = { gemini: null, groq: null };   // the user's own free keys, stored on this device
+  const LABEL = { gemini: 'Gemini', groq: 'Groq' };
+  let history = [];          // [{role, content}] for the current sheet (AI chat)
   let historySheet = null;
   let busy = false;
+  let managing = false;      // "Manage keys" open
 
-  // ----- key handling -----
-  async function loadKey() {
-    apiKey = (await getDeviceSetting('geminiKey')) || null;
+  // ----- keys -----
+  const hasAi = () => !!(keys.gemini || keys.groq);
+  async function loadKeys() {
+    keys.gemini = (await getDeviceSetting('geminiKey')) || null;
+    keys.groq = (await getDeviceSetting('groqKey')) || null;
     renderKeyState();
   }
   function renderKeyState() {
-    const has = !!apiKey;
-    $('ai-key-setup').hidden = has;
-    $('ai-gemini-actions').hidden = !has;
-    $('ai-form').hidden = !has;
-    $('ai-key-status').textContent = has ? `Gemini key saved on this device (…${apiKey.slice(-4)})` : 'No Gemini key on this device';
-    $('ai-key-remove').hidden = !has;
-  }
-  $('ai-key-link').onclick = (e) => { e.preventDefault(); openExternal(KEY_PAGE); };
-  $('ai-key-form').onsubmit = async (e) => {
-    e.preventDefault();
-    const key = $('ai-key-input').value.trim();
-    if (!key) return;
-    const btn = $('ai-key-form').querySelector('button');
-    btn.disabled = true;
-    btn.textContent = 'Checking…';
-    try {
-      modelCache = null;
-      const model = await pickModel(key);
-      await setDeviceSetting('geminiKey', key);
-      apiKey = key;
-      $('ai-key-input').value = '';
-      renderKeyState();
-      toast(`Gemini is ready (${model})`);
-    } catch (err) {
-      toast(err.message, { error: true, ms: 6000 });
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Save key';
+    $('ai-key-setup').hidden = hasAi() && !managing;
+    $('ai-gemini-actions').hidden = !hasAi();
+    $('ai-form').hidden = !hasAi();
+    for (const p of ['gemini', 'groq']) {
+      const box = panel.querySelector(`.ai-provider[data-provider="${p}"]`);
+      box.querySelector('form').hidden = !!keys[p];
+      box.querySelector('.ai-key-saved').hidden = !keys[p];
+      box.querySelector('.ai-key-saved span').textContent = keys[p] ? `Saved on this device (…${keys[p].slice(-4)})` : '';
     }
+    const saved = ['gemini', 'groq'].filter((p) => keys[p]).map((p) => LABEL[p]);
+    $('ai-key-status').textContent = saved.length ? `AI: ${saved.join(' + ')}` : 'No AI key on this device yet';
+    $('ai-keys-manage').hidden = !hasAi();
+    $('ai-keys-manage').textContent = managing ? 'Done' : 'Manage keys';
+  }
+  const CHECK = {
+    gemini: async (key) => { modelCache = null; return pickModel(key); },
+    groq: async (key) => { groqModels = null; const m = await pickGroqModels(key); return m.vision[0] || m.text[0]; },
   };
-  $('ai-key-input').addEventListener('keydown', (e) => e.stopPropagation());
-  $('ai-key-remove').onclick = async () => {
-    if (!confirm('Remove the Gemini key from this device?')) return;
-    await setDeviceSetting('geminiKey', null);
-    apiKey = null;
-    modelCache = null;
-    renderKeyState();
-  };
+  for (const a of panel.querySelectorAll('[data-key-link]')) {
+    a.onclick = (e) => { e.preventDefault(); openExternal(a.dataset.keyLink); };
+  }
+  for (const form of panel.querySelectorAll('form[data-key-form]')) {
+    const p = form.dataset.keyForm;
+    const field = form.querySelector('input');
+    field.addEventListener('keydown', (e) => e.stopPropagation());
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const key = field.value.trim();
+      if (!key) return;
+      const btn = form.querySelector('button');
+      btn.disabled = true;
+      btn.textContent = 'Checking…';
+      try {
+        const model = await CHECK[p](key);
+        await setDeviceSetting(`${p}Key`, key);
+        keys[p] = key;
+        field.value = '';
+        managing = false;
+        renderKeyState();
+        toast(`${LABEL[p]} is ready (${model})`);
+      } catch (err) {
+        toast(err.message, { error: true, ms: 6000 });
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    };
+  }
+  for (const b of panel.querySelectorAll('[data-key-remove]')) {
+    b.onclick = async () => {
+      const p = b.dataset.keyRemove;
+      if (!confirm(`Remove the ${LABEL[p]} key from this device?`)) return;
+      await setDeviceSetting(`${p}Key`, null);
+      keys[p] = null;
+      if (p === 'gemini') modelCache = null; else groqModels = null;
+      renderKeyState();
+    };
+  }
+  $('ai-keys-manage').onclick = () => { managing = !managing; renderKeyState(); };
 
   // ----- chat log -----
   function refreshHeader() {
@@ -386,7 +504,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     log.append(d);
   }
 
-  function answerButtons(el, text, sheet) {
+  function answerButtons(el, text, sheet, source, link) {
     const row = document.createElement('div');
     row.className = 'ai-buttons';
     const btn = (label, fn) => {
@@ -394,7 +512,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
       b.onclick = () => fn(b);
       row.append(b);
     };
-    btn('Add to sheet', async (b) => {
+    if (sheet) btn('Add to sheet', async (b) => {
       b.disabled = true;
       try {
         const id = await insertOnSheet(getSheet(sheet.id) || sheet, text);
@@ -410,6 +528,13 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
       try { await navigator.clipboard.writeText(text); b.textContent = 'Copied ✓'; } catch { toast('Copy failed', { error: true }); }
     });
     if (canReadAloud()) btn('Read', (b) => toggleSpeak(text, b));
+    if (link) btn('Open', () => openExternal(link));
+    if (source) {
+      const tag = document.createElement('span');
+      tag.className = 'ai-source';
+      tag.textContent = source;
+      row.append(tag);
+    }
     el.append(row);
   }
 
@@ -433,9 +558,9 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     const { sheet, index } = cur;
     const text = await sheetText(sheet);
     if (!text) {
-      toast(apiKey
-        ? 'No printed text on this sheet. Try "Handwriting → text" (Gemini).'
-        : 'No printed text on this sheet. Handwriting needs the free Gemini key below.', { ms: 5000 });
+      toast(hasAi()
+        ? 'No printed text on this sheet. Try "Handwriting → text".'
+        : 'No printed text on this sheet. Reading handwriting needs a free AI key (below).', { ms: 5000 });
       return;
     }
     if (action === 'read') { toggleSpeak(text, button); return; }
@@ -453,25 +578,45 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     }
   }
 
-  // ----- Gemini -----
+  // ----- AI (Gemini and/or Groq: if one is busy the other answers) -----
   async function ask(action, question, label) {
-    if (busy || !apiKey) return;
+    if (busy || !hasAi()) return;
     const cur = getCurrent();
     if (!cur) { toast('Open a notebook with at least one sheet first'); return; }
-    if (!navigator.onLine) { toast('Gemini needs an internet connection', { error: true }); return; }
+    if (!navigator.onLine) { toast('AI needs an internet connection', { error: true }); return; }
     const { sheet, index } = cur;
     divider(sheet.id, index);
     busy = true;
     panel.classList.add('busy');
     bubble('user', label);
     const waiting = bubble('assistant', 'Reading the sheet…', 'waiting');
+    const status = (msg) => { waiting.querySelector('.ai-text').textContent = msg; };
     try {
       const image = await sheetPicture(sheet);
+      const pageText = await sheetText(sheet);
       const prompt = action === 'ask' ? question : PROMPTS[action];
-      const res = await askGemini(apiKey, { prompt, image, history }, (msg) => { waiting.querySelector('.ai-text').textContent = msg; });
+      const order = ['gemini', 'groq'].filter((p) => keys[p]);
+      let res = null, lastError = null;
+      for (let i = 0; i < order.length && !res; i++) {
+        const p = order[i];
+        try {
+          res = p === 'gemini'
+            ? await askGemini(keys.gemini, { prompt, image, history }, status)
+            : await askGroq(keys.groq, { prompt, image, pageText, history }, status);
+        } catch (err) {
+          lastError = err;
+          if (i < order.length - 1) status(`${LABEL[p]} did not answer, asking ${LABEL[order[i + 1]]}…`);
+        }
+      }
+      if (!res) {
+        if (order.length === 1 && lastError && lastError.retryable) {
+          lastError.message += ` Tip: add a free ${order[0] === 'gemini' ? 'Groq' : 'Gemini'} key too (Manage keys), then the other one answers when this one is busy.`;
+        }
+        throw lastError || new Error('The AI did not answer. Please try again.');
+      }
       waiting.remove();
       const el = bubble('assistant', res.text);
-      answerButtons(el, res.text, sheet);
+      answerButtons(el, res.text, sheet, res.provider);
       if (res.truncated) bubble('assistant', 'The answer was cut off because it was very long.', 'note');
       history.push({ role: 'user', content: prompt }, { role: 'assistant', content: res.text });
       history = history.slice(-12);
@@ -483,6 +628,31 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
       panel.classList.remove('busy');
     }
   }
+
+  // ----- Wikipedia look-up (free, no key) -----
+  $('ai-lookup').onsubmit = async (e) => {
+    e.preventDefault();
+    const field = $('ai-lookup').querySelector('input');
+    const term = field.value.trim();
+    if (!term) return;
+    if (!navigator.onLine) { toast('Look-up needs an internet connection', { error: true }); return; }
+    const cur = getCurrent();
+    if (cur) divider(cur.sheet.id, cur.index);
+    field.value = '';
+    bubble('user', `Look up: ${term}`);
+    const waiting = bubble('assistant', 'Searching Wikipedia…', 'waiting');
+    try {
+      const r = await wikiLookup(term);
+      waiting.remove();
+      const text = `${r.title}\n\n${r.text}`;
+      const el = bubble('assistant', text);
+      answerButtons(el, text, cur ? cur.sheet : null, 'Wikipedia', r.url);
+    } catch (err) {
+      waiting.remove();
+      bubble('assistant', err.message, 'error');
+    }
+  };
+  $('ai-lookup').querySelector('input').addEventListener('keydown', (e) => e.stopPropagation());
 
   for (const b of panel.querySelectorAll('[data-offline]')) b.onclick = () => offline(b.dataset.offline, b);
   for (const b of panel.querySelectorAll('[data-ai]')) b.onclick = () => ask(b.dataset.ai, undefined, b.textContent);
@@ -510,6 +680,6 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
   // Keep the "Sheet N" label in sync while scrolling.
   $('viewport').addEventListener('scroll', () => { if (!panel.hidden) refreshHeader(); }, { passive: true });
 
-  loadKey();
+  loadKeys();
   return { toggle, isOpen: () => !panel.hidden };
 }

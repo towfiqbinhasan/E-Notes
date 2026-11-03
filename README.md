@@ -256,18 +256,21 @@ middle of the screen.
 
 These work on PDF pages that contain real text (not scanned images).
 
-**Gemini (free Google key):** Handwriting → text, Summarize, Explain page,
-Quiz me, Translate বাংলা ⇄ English, and questions about the sheet.
+**Look up (free, no key):** type a word or topic, get a short explanation from
+Wikipedia in English or বাংলা.
 
-1. Open https://aistudio.google.com/apikey and sign in with Google.
-2. Press **Create API key** (no card needed), copy it.
-3. In E-Notes open ✨ AI helper, paste the key, press **Save key**.
+**AI with free keys:** Handwriting → text, Summarize, Explain page, Quiz me,
+Translate বাংলা ⇄ English, and questions about the sheet. Add one or both keys
+(no card needed); when one is busy, the other answers automatically:
 
-The key is stored only on that device (enter it once on each device). Free
-Gemini keys have daily limits, and Google may use free-tier requests to improve
-its models, so keep very private notes out.
+| Provider | Get the key | Notes |
+|---|---|---|
+| Google Gemini | https://aistudio.google.com/apikey → **Create API key** | best at handwriting and Bangla; busy at peak times |
+| Groq | https://console.groq.com/keys → **Create API Key** | very fast; reads pictures with Llama 4 |
 
----
+In E-Notes open ✨ AI helper, paste the key, press **Save** (once per device;
+the key stays on that device). Free keys have daily limits, and providers may
+use free-tier requests to improve their models, so keep very private notes out.
 
 ## How it works
 

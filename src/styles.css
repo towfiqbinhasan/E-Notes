@@ -605,3 +605,13 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .ai-key input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
 .ai-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ai-note { margin: 0; padding: 0 12px 10px; font-size: 11px; }
+.ai-lookup { margin-top: 8px; }
+.ai-lookup input, .ai-provider input {
+  flex: 1; min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+}
+.ai-lookup input:focus, .ai-provider input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.ai-provider { padding: 8px 10px; border: 1px solid var(--border); border-radius: 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ai-provider a { font-size: 12px; color: var(--accent); }
+.ai-source { margin-left: auto; align-self: center; font-size: 11px; color: var(--muted); }
+.ai-buttons { flex-wrap: wrap; align-items: center; }
+.ai-buttons .btn { white-space: nowrap; }

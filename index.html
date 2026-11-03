@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#171a23" media="(prefers-color-scheme: dark)" />
     <meta name="description" content="E-Notes: handwrite notes next to your PDFs. Syncs live across Windows, Linux, Android and the web. Created by Md. Towfiq Bin Hasan and TH team." />
     <meta name="author" content="Md. Towfiq Bin Hasan and TH team" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://api.groq.com https://*.wikipedia.org http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*;" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/png" href="./icons/icon-192.png" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
@@ -138,9 +138,13 @@
               <button class="btn small" data-offline="points">Key points</button>
               <button class="btn small" data-offline="text">Page text</button>
             </div>
+            <form id="ai-lookup" class="row ai-lookup">
+              <input type="search" placeholder="Look up a word or topic (Wikipedia, বাংলা/English)" autocomplete="off" />
+              <button class="btn small" type="submit">Look up</button>
+            </form>
           </div>
           <div class="ai-section">
-            <div class="ai-section-title">Gemini AI · free key</div>
+            <div class="ai-section-title">AI · free keys (Gemini / Groq)</div>
             <div class="ai-actions" id="ai-gemini-actions" hidden>
               <button class="btn small" data-ai="transcribe">Handwriting → text</button>
               <button class="btn small" data-ai="summarize">Summarize</button>
@@ -150,14 +154,25 @@
             </div>
             <div id="ai-key-setup" class="ai-key" hidden>
               <p class="small">
-                Read handwriting, summarize, explain and chat about your pages with Google Gemini. The key is free
-                (no card): <a href="#" id="ai-key-link">open Google AI Studio</a>, sign in, press <b>Create API key</b>,
-                then paste it here.
+                Read handwriting, summarize, explain and chat about your pages. Both keys are free (no card).
+                Add one, or both: when one is busy, the other answers.
               </p>
-              <form id="ai-key-form" class="row">
-                <input id="ai-key-input" type="password" placeholder="Paste your Gemini API key" autocomplete="off" spellcheck="false" />
-                <button class="btn small primary" type="submit">Save key</button>
-              </form>
+              <div class="ai-provider" data-provider="gemini">
+                <div class="row between"><b>Google Gemini</b><a href="#" data-key-link="https://aistudio.google.com/apikey">Get a free key</a></div>
+                <form class="row" data-key-form="gemini">
+                  <input type="password" placeholder="Paste Gemini key (AIza…)" autocomplete="off" spellcheck="false" />
+                  <button class="btn small primary" type="submit">Save</button>
+                </form>
+                <div class="row between ai-key-saved" hidden><span class="small muted"></span><button type="button" class="link small" data-key-remove="gemini">Remove</button></div>
+              </div>
+              <div class="ai-provider" data-provider="groq">
+                <div class="row between"><b>Groq <span class="muted small">(very fast)</span></b><a href="#" data-key-link="https://console.groq.com/keys">Get a free key</a></div>
+                <form class="row" data-key-form="groq">
+                  <input type="password" placeholder="Paste Groq key (gsk_…)" autocomplete="off" spellcheck="false" />
+                  <button class="btn small primary" type="submit">Save</button>
+                </form>
+                <div class="row between ai-key-saved" hidden><span class="small muted"></span><button type="button" class="link small" data-key-remove="groq">Remove</button></div>
+              </div>
             </div>
           </div>
           <div id="ai-log" class="ai-log">
@@ -169,9 +184,9 @@
           </form>
           <div class="ai-foot">
             <span id="ai-key-status" class="muted small"></span>
-            <button type="button" class="link small" id="ai-key-remove" hidden>Remove key</button>
+            <button type="button" class="link small" id="ai-keys-manage" hidden>Manage keys</button>
           </div>
-          <p class="muted small ai-note">Free Gemini keys: Google may use what you send to improve its models. Keep very private notes out.</p>
+          <p class="muted small ai-note">Free AI keys: the provider may use what you send to improve its models. Keep very private notes out.</p>
         </aside>
       </main>
     </div>
