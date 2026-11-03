@@ -410,7 +410,7 @@ export class SheetView {
         return;
       }
       // The PDF may still be uploading from another device: keep trying while the page is shown.
-      this.pdfBox.dataset.msg = 'Could not load this PDF page — trying again…';
+      this.pdfBox.dataset.msg = `Could not load this PDF page — trying again…\n(${err?.message || err})`;
       this.retryDelay = Math.min((this.retryDelay || 2500) * 2, 120000);
       setTimeout(() => { if (token === this.loadToken && this.active) this.loadPdf(); }, this.retryDelay);
     }
