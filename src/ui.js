@@ -780,6 +780,15 @@ export function initUI(opts) {
     },
     scrollToSheet: (id) => requestAnimationFrame(() => scrollToSheet(id)),
     toast,
+    /** The sheet under a screen point (for "Snip"): {sheet, rect, zoom} or null. */
+    sheetAt: (x, y) => {
+      for (const el of document.elementsFromPoint(x, y)) {
+        const sheetEl = el.closest && el.closest('.sheet');
+        const v = sheetEl && views.get(sheetEl.dataset.id);
+        if (v) return { sheet: store.getSheet(v.sheet.id) || v.sheet, rect: v.el.getBoundingClientRect(), zoom: v.zoom };
+      }
+      return null;
+    },
   });
   $('btn-ai').onclick = () => aiPanel.toggle();
 

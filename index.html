@@ -179,8 +179,20 @@
             <p class="muted small">The helper reads the sheet in the middle of the screen. Ask anything about it, in English or বাংলা.</p>
           </div>
           <form id="ai-form" class="ai-form" hidden>
-            <textarea id="ai-input" rows="2" placeholder="Ask about this sheet…"></textarea>
-            <button class="btn primary" type="submit">Send</button>
+            <div id="ai-attach" class="ai-attach" hidden>
+              <img alt="Attached picture" />
+              <span class="small muted">Picture attached. Ask about it, or press a button above.</span>
+              <button type="button" class="icon-btn" id="ai-attach-clear" title="Remove picture">✕</button>
+            </div>
+            <div class="ai-form-row">
+              <div class="ai-tools">
+                <button type="button" class="icon-btn" id="ai-attach-btn" title="Attach a picture or screenshot (or paste it with Ctrl+V)">📎</button>
+                <button type="button" class="icon-btn" id="ai-snip-btn" title="Snip: drag over part of a sheet">✂</button>
+              </div>
+              <textarea id="ai-input" rows="2" placeholder="Ask about this sheet, or paste a screenshot…"></textarea>
+              <button class="btn primary" type="submit">Send</button>
+            </div>
+            <input id="ai-file" type="file" accept="image/*" hidden />
           </form>
           <div class="ai-foot">
             <span id="ai-key-status" class="muted small"></span>

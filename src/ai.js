@@ -18,6 +18,42 @@ const AI_TEXT = { color: '#1d4ed8', size: 18 };
 
 /** Picture of a sheet (PDF page + ink + text) as base64 JPEG, ~1200 px wide. */
 async function sheetPicture(sheet, width = 1200) {
+  const canvas = await sheetCanvas(sheet, width);
+  const out = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  canvas.width = canvas.height = 0;
+  return out;
+}
+
+/** Any picture (file, pasted screenshot, canvas) -> base64 JPEG, at most `max` px on its long side. */
+async function toJpeg(source, max = 1600) {
+  let bitmap = source;
+  if (source instanceof Blob) {
+    const url = URL.createObjectURL(source);
+    try {
+      bitmap = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('This picture format cannot be read. Try a PNG or JPG.'));
+        img.src = url;
+      });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  }
+  const w = bitmap.naturalWidth || bitmap.width, h = bitmap.naturalHeight || bitmap.height;
+  const k = Math.min(1, max / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k));
+  c.height = Math.max(1, Math.round(h * k));
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';            // transparent screenshots get a white background
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bitmap, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.88).split(',')[1];
+}
+
+/** Sheet rendered to a canvas `width` px wide. */
+async function sheetCanvas(sheet, width) {
   const k = width / SHEET_W;
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -34,7 +70,7 @@ async function sheetPicture(sheet, width = 1200) {
   ctx.scale(k, k);
   drawItems(ctx, sheet.strokes);
   drawTextItems(ctx, sheet.strokes);
-  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+  return canvas;
 }
 
 /** Printed PDF text of the sheet plus its typed text boxes. */
@@ -305,7 +341,8 @@ async function askGroq(key, { prompt, image, pageText, history }, onStatus = () 
   };
   let lastError = null;
   // First models that can see the sheet picture; then text-only models with the printed text.
-  for (const withImage of [true, false]) {
+  // A question about an attached picture never goes to a model that cannot see it.
+  for (const withImage of pageText === null ? [true] : [true, false]) {
     for (const m of models) {
       if (withImage === groqTextOnly.has(m)) continue;
       const res = await send(m, withImage);
@@ -405,7 +442,7 @@ async function insertOnSheet(sheet, text) {
 /**
  * opts: { getCurrent() -> {sheet, index} | null, scrollToSheet(id), toast(msg, opts) }
  */
-export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
+export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
   const panel = $('ai-panel');
   const log = $('ai-log');
   const input = $('ai-input');
@@ -415,6 +452,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
   let historySheet = null;
   let busy = false;
   let managing = false;      // "Manage keys" open
+  let attached = null;       // picture the user attached / pasted / snipped: base64 JPEG
 
   // ----- keys -----
   const hasAi = () => !!(keys.gemini || keys.groq);
@@ -490,9 +528,16 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     $('ai-sheet').textContent = cur ? `Sheet ${cur.index + 1}` : 'No sheet';
   }
 
-  function bubble(role, text, cls = '') {
+  function bubble(role, text, cls = '', imageB64 = null) {
     const el = document.createElement('div');
     el.className = `ai-msg ${role} ${cls}`;
+    if (imageB64) {
+      const img = document.createElement('img');
+      img.className = 'ai-msg-img';
+      img.src = `data:image/jpeg;base64,${imageB64}`;
+      img.alt = '';
+      el.append(img);
+    }
     const body = document.createElement('div');
     body.className = 'ai-text';
     body.textContent = text;
@@ -596,13 +641,20 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     divider(sheet.id, index);
     busy = true;
     panel.classList.add('busy');
-    bubble('user', label);
-    const waiting = bubble('assistant', 'Reading the sheet…', 'waiting');
+    const pic = attached;
+    if (pic) {
+      // A new picture starts a new conversation about that picture.
+      history = [];
+      clearAttachment();
+    }
+    bubble('user', label, '', pic);
+    const waiting = bubble('assistant', pic ? 'Looking at the picture…' : 'Reading the sheet…', 'waiting');
     const status = (msg) => { waiting.querySelector('.ai-text').textContent = msg; };
     try {
-      const image = await sheetPicture(sheet);
-      const pageText = await sheetText(sheet);
-      const prompt = action === 'ask' ? question : PROMPTS[action];
+      const image = pic || await sheetPicture(sheet);
+      const pageText = pic ? null : await sheetText(sheet); // null: a picture-only question
+      let prompt = action === 'ask' ? question : PROMPTS[action];
+      if (pic && action !== 'ask') prompt = prompt.replace(/this sheet|this page|the page|my notes/gi, 'this picture');
       const order = ['gemini', 'groq'].filter((p) => keys[p]);
       let res = null, lastError = null;
       for (let i = 0; i < order.length && !res; i++) {
@@ -637,6 +689,106 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     }
   }
 
+  // ----- pictures: attach, paste, drop, snip -----
+  function setAttachment(b64) {
+    attached = b64;
+    $('ai-attach').hidden = false;
+    $('ai-attach').querySelector('img').src = `data:image/jpeg;base64,${b64}`;
+    input.focus();
+  }
+  function clearAttachment() {
+    attached = null;
+    $('ai-attach').hidden = true;
+    $('ai-attach').querySelector('img').removeAttribute('src');
+  }
+  async function attachFile(file) {
+    if (!file || !/^image\//.test(file.type)) { toast('Please choose a picture (PNG or JPG)', { error: true }); return; }
+    if (!hasAi()) { toast('Add a free AI key first (below) to ask about pictures'); return; }
+    try { setAttachment(await toJpeg(file)); } catch (err) { toast(err.message, { error: true }); }
+  }
+  $('ai-attach-btn').onclick = () => $('ai-file').click();
+  $('ai-file').onchange = () => { const f = $('ai-file').files[0]; $('ai-file').value = ''; if (f) attachFile(f); };
+  $('ai-attach-clear').onclick = clearAttachment;
+  // Ctrl+V a screenshot anywhere in the panel.
+  panel.addEventListener('paste', (e) => {
+    const item = [...(e.clipboardData ? e.clipboardData.items : [])].find((it) => it.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    attachFile(item.getAsFile());
+  });
+  // Drop a picture onto the panel (PDFs dropped elsewhere still go to the notebook).
+  panel.addEventListener('dragover', (e) => {
+    if ([...(e.dataTransfer ? e.dataTransfer.items : [])].some((it) => it.type.startsWith('image/'))) {
+      e.preventDefault();
+      e.stopPropagation();
+      panel.classList.add('drop-target');
+    }
+  });
+  panel.addEventListener('dragleave', () => panel.classList.remove('drop-target'));
+  panel.addEventListener('drop', (e) => {
+    const file = [...(e.dataTransfer ? e.dataTransfer.files : [])].find((f) => f.type.startsWith('image/'));
+    panel.classList.remove('drop-target');
+    if (!file) return;
+    e.preventDefault();
+    e.stopPropagation();
+    $('drop-overlay').hidden = true;
+    attachFile(file);
+  });
+
+  // Snip: drag a rectangle over a sheet; that part becomes the attached picture.
+  $('ai-snip-btn').onclick = () => {
+    if (!sheetAt) return;
+    const overlay = Object.assign(document.createElement('div'), { className: 'snip-overlay' });
+    const hint = Object.assign(document.createElement('div'), { className: 'snip-hint', textContent: 'Drag over the part of the sheet you want to ask about · Esc to cancel' });
+    const rectEl = Object.assign(document.createElement('div'), { className: 'snip-rect' });
+    rectEl.hidden = true;
+    document.body.append(overlay, hint, rectEl);
+    const wasOpen = !panel.hidden;
+    panel.hidden = true;          // show the whole sheet while snipping
+    let start = null;
+    const finish = () => {
+      overlay.remove(); hint.remove(); rectEl.remove();
+      document.removeEventListener('keydown', onKey, true);
+      if (wasOpen) panel.hidden = false;
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); finish(); } };
+    document.addEventListener('keydown', onKey, true);
+    overlay.addEventListener('pointerdown', (e) => {
+      start = { x: e.clientX, y: e.clientY };
+      overlay.setPointerCapture(e.pointerId);
+    });
+    overlay.addEventListener('pointermove', (e) => {
+      if (!start) return;
+      const x = Math.min(start.x, e.clientX), y = Math.min(start.y, e.clientY);
+      Object.assign(rectEl.style, { left: `${x}px`, top: `${y}px`, width: `${Math.abs(e.clientX - start.x)}px`, height: `${Math.abs(e.clientY - start.y)}px` });
+      rectEl.hidden = false;
+    });
+    overlay.addEventListener('pointerup', async (e) => {
+      if (!start) return;
+      const box = { x0: Math.min(start.x, e.clientX), y0: Math.min(start.y, e.clientY), x1: Math.max(start.x, e.clientX), y1: Math.max(start.y, e.clientY) };
+      overlay.hidden = true; rectEl.hidden = true;   // let elementsFromPoint see the sheet
+      const hit = sheetAt((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2);
+      finish();
+      if (box.x1 - box.x0 < 12 || box.y1 - box.y0 < 12) { toast('Drag a bigger area to snip'); return; }
+      if (!hit) { toast('Snip over a sheet', { error: true }); return; }
+      try {
+        // Render the sheet sharply, then cut out the dragged area.
+        const W = 2000, u = W / SHEET_W;
+        const full = await sheetCanvas(hit.sheet, W);
+        const sx = Math.max(0, ((box.x0 - hit.rect.left) / hit.zoom) * u), sy = Math.max(0, ((box.y0 - hit.rect.top) / hit.zoom) * u);
+        const sw = Math.min(full.width - sx, ((box.x1 - box.x0) / hit.zoom) * u), sh = Math.min(full.height - sy, ((box.y1 - box.y0) / hit.zoom) * u);
+        const cut = document.createElement('canvas');
+        cut.width = Math.max(1, Math.round(sw)); cut.height = Math.max(1, Math.round(sh));
+        cut.getContext('2d').drawImage(full, sx, sy, sw, sh, 0, 0, cut.width, cut.height);
+        full.width = full.height = 0;
+        if (!hasAi()) { toast('Add a free AI key first (below) to ask about pictures'); return; }
+        setAttachment(await toJpeg(cut));
+      } catch (err) {
+        toast(`Could not snip: ${err.message}`, { error: true });
+      }
+    });
+  };
+
   // ----- Wikipedia look-up (free, no key) -----
   $('ai-lookup').onsubmit = async (e) => {
     e.preventDefault();
@@ -667,8 +819,9 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
   if (!canReadAloud()) panel.querySelector('[data-offline="read"]').hidden = true;
   $('ai-form').onsubmit = (e) => {
     e.preventDefault();
-    const q = input.value.trim();
-    if (!q) return;
+    let q = input.value.trim();
+    if (!q && !attached) return;
+    if (!q) q = 'What is in this picture? Explain it simply.';
     input.value = '';
     ask('ask', q, q);
   };

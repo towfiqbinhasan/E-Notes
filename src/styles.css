@@ -615,3 +615,24 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .ai-source { margin-left: auto; align-self: center; font-size: 11px; color: var(--muted); }
 .ai-buttons { flex-wrap: wrap; align-items: center; }
 .ai-buttons .btn { white-space: nowrap; }
+
+/* ---------- AI picture attach + snip ---------- */
+.ai-form { flex-direction: column; align-items: stretch; }
+.ai-form-row { display: flex; gap: 8px; align-items: flex-end; }
+.ai-tools { display: flex; flex-direction: column; gap: 2px; }
+.ai-tools .icon-btn { width: 34px; height: 30px; font-size: 16px; }
+.ai-attach {
+  display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 12px;
+  background: var(--panel-2); border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  animation: pop-in 0.2s var(--ease);
+}
+.ai-attach img { width: 64px; height: 48px; object-fit: cover; border-radius: 8px; background: #fff; flex: none; }
+.ai-attach span { flex: 1; line-height: 1.3; }
+.ai-panel.drop-target { box-shadow: inset 0 0 0 3px var(--accent); }
+.ai-msg img.ai-msg-img { display: block; max-width: 100%; max-height: 180px; border-radius: 10px; margin-bottom: 6px; background: #fff; }
+.snip-overlay { position: fixed; inset: 0; z-index: 60; cursor: crosshair; touch-action: none; background: rgba(8, 10, 20, 0.18); animation: fade-in 0.15s ease; }
+.snip-hint {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 61; pointer-events: none;
+  background: rgba(23, 26, 38, 0.92); color: #fff; padding: 9px 16px; border-radius: 99px; font-size: 13px; font-weight: 500;
+}
+.snip-rect { position: fixed; z-index: 61; border: 2px dashed #fff; border-radius: 4px; box-shadow: 0 0 0 9999px rgba(8, 10, 20, 0.4); pointer-events: none; }

@@ -268,6 +268,11 @@ Translate বাংলা ⇄ English, and questions about the sheet. Add one or
 | Google Gemini | https://aistudio.google.com/apikey → **Create API key** | best at handwriting and Bangla; busy at peak times |
 | Groq | https://console.groq.com/keys → **Create API Key** | very fast; reads pictures (Qwen), reads handwriting |
 
+**Ask about a picture:** in the chat box use 📎 to attach a picture or
+screenshot (on Android you can also take a photo), press **Ctrl+V** to paste a
+screenshot, drop a picture onto the panel, or press ✂ **Snip** and drag over
+part of a sheet. Then type a question (or just press Send) or use a button.
+
 In E-Notes open ✨ AI helper, paste the key, press **Save** (once per device;
 the key stays on that device). Free keys have daily limits, and providers may
 use free-tier requests to improve their models, so keep very private notes out.
