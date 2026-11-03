@@ -15,17 +15,26 @@ export function clearHistory() { undoStack = []; redoStack = []; listener(); }
 
 /** Apply a change and remember it. added/removed are full item objects. */
 export async function commit(sheetId, added = [], removed = []) {
-  await changeItems(sheetId, { add: added, remove: removed.map((i) => i.id) });
-  undoStack.push({ sheetId, added, removed });
+  return commitMany([{ sheetId, added, removed }]);
+}
+
+/** Changes on several sheets that undo/redo together (e.g. a stroke drawn across two sheets). */
+export async function commitMany(parts) {
+  for (const p of parts) await changeItems(p.sheetId, { add: p.added || [], remove: (p.removed || []).map((i) => i.id) });
+  undoStack.push({ parts: parts.map((p) => ({ sheetId: p.sheetId, added: p.added || [], removed: p.removed || [] })) });
   if (undoStack.length > LIMIT) undoStack.shift();
   redoStack = [];
   listener();
 }
 
 async function invert(entry) {
-  const restored = entry.removed.map((it) => ({ ...it, id: uid(), deleted_at: undefined }));
-  await changeItems(entry.sheetId, { add: restored, remove: entry.added.map((i) => i.id) });
-  return { sheetId: entry.sheetId, added: restored, removed: entry.added };
+  const parts = [];
+  for (const part of entry.parts) {
+    const restored = part.removed.map((it) => ({ ...it, id: uid(), deleted_at: undefined }));
+    await changeItems(part.sheetId, { add: restored, remove: part.added.map((i) => i.id) });
+    parts.push({ sheetId: part.sheetId, added: restored, removed: part.added });
+  }
+  return { parts };
 }
 
 export async function undo() {

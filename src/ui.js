@@ -338,6 +338,16 @@ export function initUI(opts) {
       : 'Add a PDF or a blank sheet and a notebook is created for you.';
   }
 
+  /** The sheet view under a screen point (live canvases and overlays are skipped). */
+  function viewAtPoint(x, y) {
+    for (const el of document.elementsFromPoint(x, y)) {
+      const sheetEl = el.closest && el.closest('.sheet');
+      const v = sheetEl && views.get(sheetEl.dataset.id);
+      if (v) return v;
+    }
+    return null;
+  }
+
   const findView = (target) => {
     const el = target.closest && target.closest('.sheet');
     return el ? views.get(el.dataset.id) : null;
@@ -511,6 +521,7 @@ export function initUI(opts) {
     viewport,
     laserCanvas: $('laser-canvas'),
     findView,
+    viewAt: viewAtPoint,
     getTool: () => prefs.tool,
     getPen: (tool) => toolStyle(prefs, tool),
     getZoom: zoom,
@@ -794,12 +805,8 @@ export function initUI(opts) {
     toast,
     /** The sheet under a screen point (for "Snip"): {sheet, rect, zoom} or null. */
     sheetAt: (x, y) => {
-      for (const el of document.elementsFromPoint(x, y)) {
-        const sheetEl = el.closest && el.closest('.sheet');
-        const v = sheetEl && views.get(sheetEl.dataset.id);
-        if (v) return { sheet: store.getSheet(v.sheet.id) || v.sheet, rect: v.el.getBoundingClientRect(), zoom: v.zoom };
-      }
-      return null;
+      const v = viewAtPoint(x, y);
+      return v ? { sheet: store.getSheet(v.sheet.id) || v.sheet, rect: v.el.getBoundingClientRect(), zoom: v.zoom } : null;
     },
   });
   $('btn-ai').onclick = () => aiPanel.toggle();

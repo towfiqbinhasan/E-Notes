@@ -4,7 +4,7 @@
 import { getStroke } from 'perfect-freehand';
 import { getPageImage } from './pdf.js';
 import { uid } from './store.js';
-import { commit } from './history.js';
+import { commit, commitMany } from './history.js';
 import { recognizeShape } from './shapes.js';
 
 /** Every sheet is 1000 units wide; strokes are stored in these units. */
@@ -517,8 +517,43 @@ export function createInput(opts) {
     };
     if (tool === 'pen' && pen.kind) draw.item.k = pen.kind;
     if (typeof pen.opacity === 'number') draw.item.o = pen.opacity;
-    attachLive(view);
+    draw.done = [];                 // finished parts on earlier sheets (stroke drawn across sheets)
+    draw.liveEl = newLiveCanvas(view);
     addPoints(e);
+  }
+
+  function newLiveCanvas(view) {
+    const c = document.createElement('canvas');
+    c.className = 'sheet-live';
+    c.getContext('2d', { desynchronized: true }); // low-latency ink
+    view.el.append(c);
+    view.prepareCanvas(c);
+    return c;
+  }
+
+  const r1 = (n) => Math.round(n * 10) / 10;
+
+  /** The pen moved off this sheet onto another one: keep writing there as a new stroke. */
+  function continueOnSheet(next, ev, pr) {
+    const d = draw;
+    // Let the old part run past the edge so both parts meet at the border.
+    const q = d.view.toUnits(ev.clientX, ev.clientY, d.rect);
+    d.item.p.push(r1(q.x), r1(q.y), pr);
+    drawItem(d.view.prepareCanvas(d.liveEl), { ...d.item });
+    if (opts.onLiveInk) opts.onLiveInk({ sheetId: d.view.sheet.id, item: { ...d.item, p: d.item.p.slice() }, done: false });
+    d.done.push({ view: d.view, item: d.item, liveEl: d.liveEl });
+    const item = { ...d.item, id: uid(), p: [], created: Date.now() };
+    d.view = next;
+    d.rect = next.el.getBoundingClientRect();
+    d.item = item;
+    d.liveEl = newLiveCanvas(next);
+    if (d.lastClient) {
+      const s = next.toUnits(d.lastClient.x, d.lastClient.y, d.rect);
+      item.p.push(r1(s.x), r1(s.y), d.lastClient.pr);
+    }
+    clearTimeout(d.holdTimer);
+    d.anchor = null;
+    d.crossed = true;              // no shape snapping for strokes that span sheets
   }
 
   function addPoints(e) {
@@ -532,14 +567,24 @@ export function createInput(opts) {
     }
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     for (const ev of evs.length ? evs : [e]) {
-      const { x, y } = draw.view.toUnits(ev.clientX, ev.clientY, draw.rect);
+      let { x, y } = draw.view.toUnits(ev.clientX, ev.clientY, draw.rect);
       let pr = ev.pointerType === 'pen' ? ev.pressure : 0.5;
       if (!pr) pr = 0.5;
+      pr = Math.round(pr * 100) / 100;
+      // Crossed onto another sheet (above or below)? Continue the stroke there.
+      if ((y < 0 || y > draw.view.sheet.height) && opts.viewAt) {
+        const next = opts.viewAt(ev.clientX, ev.clientY);
+        if (next && next !== draw.view) {
+          continueOnSheet(next, ev, pr);
+          ({ x, y } = draw.view.toUnits(ev.clientX, ev.clientY, draw.rect));
+        }
+      }
+      draw.lastClient = { x: ev.clientX, y: ev.clientY, pr };
       const p = draw.item.p;
       const n = p.length;
       // Skip points closer than 0.3 units to the previous one.
       if (n && Math.abs(p[n - 3] - x) < 0.3 && Math.abs(p[n - 2] - y) < 0.3) continue;
-      p.push(Math.round(x * 10) / 10, Math.round(y * 10) / 10, Math.round(pr * 100) / 100);
+      p.push(r1(x), r1(y), pr);
     }
     armShapeTimer();
     scheduleLive();
@@ -547,7 +592,7 @@ export function createInput(opts) {
 
   // Hold the pen still at the end of a stroke -> clean shape.
   function armShapeTimer() {
-    if (!opts.shapeHold() || draw.straight) return;
+    if (!opts.shapeHold() || draw.straight || draw.crossed) return;
     const p = draw.item.p;
     const n = p.length;
     if (!n) return;
@@ -578,7 +623,7 @@ export function createInput(opts) {
       liveFrame = 0;
       if (!draw) return;
       if (draw.kind === 'ink') {
-        const ctx = draw.view.prepareCanvas(live);
+        const ctx = draw.view.prepareCanvas(draw.liveEl);
         // A fresh copy each frame (geometry is cached per object), plus the predicted tail.
         const tail = !draw.shaped && draw.predicted ? draw.predicted : [];
         drawItem(ctx, { ...draw.item, p: tail.length ? draw.item.p.concat(tail) : draw.item.p });
@@ -666,12 +711,36 @@ export function createInput(opts) {
     return changed;
   }
 
+  async function finishErase(d, cancelled) {
+    const removed = [...d.removed.values()];
+    const added = [...d.pieces.values()];
+    d.view.hidden = null;
+    d.view.extra = null;
+    if (!cancelled && (removed.length || added.length)) await commit(d.view.sheet.id, added, removed);
+    else for (const it of removed) { const el = d.view.textEl(it.id); if (el) el.style.visibility = ''; }
+    d.view.renderInk();
+  }
+
   function eraseAt(e) {
     const d = draw;
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     let changed = false;
     for (const ev of evs.length ? evs : [e]) {
-      const pt = d.view.toUnits(ev.clientX, ev.clientY, d.rect);
+      let pt = d.view.toUnits(ev.clientX, ev.clientY, d.rect);
+      // Rubbing onto another sheet: save what was erased here and keep erasing there.
+      if ((pt.y < 0 || pt.y > d.view.sheet.height) && opts.viewAt) {
+        const next = opts.viewAt(ev.clientX, ev.clientY);
+        if (next && next !== d.view) {
+          if (changed) { d.view.hidden = new Set(d.removed.keys()); d.view.extra = [...d.pieces.values()]; }
+          finishErase({ ...d }, false);
+          Object.assign(d, {
+            view: next, rect: next.el.getBoundingClientRect(), r: (d.r * d.view.zoom) / next.zoom,
+            removed: new Map(), pieces: new Map(), last: null, textBoxes: new Map(),
+          });
+          changed = false;
+          pt = d.view.toUnits(ev.clientX, ev.clientY, d.rect);
+        }
+      }
       // Fill the gap since the last event so fast movements don't skip strokes.
       const from = d.last || pt;
       const steps = Math.max(1, Math.ceil(Math.hypot(pt.x - from.x, pt.y - from.y) / Math.max(1, d.r / 2)));
@@ -943,20 +1012,17 @@ export function createInput(opts) {
     if (!d) return;
     if (d.kind === 'ink') {
       clearTimeout(d.holdTimer);
-      if (d.straight) straighten(d.item);
-      if (d.item.p.length && !cancelled) {
-        if (opts.onLiveInk) opts.onLiveInk({ sheetId: d.view.sheet.id, item: d.item, done: true });
-        await commit(d.view.sheet.id, [d.item], []);
+      const parts = [...d.done, { view: d.view, item: d.item, liveEl: d.liveEl }];
+      if (d.straight && parts.length === 1) straighten(d.item);
+      const valid = parts.filter((pt) => pt.item.p.length);
+      if (valid.length && !cancelled) {
+        if (opts.onLiveInk) for (const pt of valid) opts.onLiveInk({ sheetId: pt.view.sheet.id, item: pt.item, done: true });
+        // One undo step for the whole stroke, even when it spans several sheets.
+        await commitMany(valid.map((pt) => ({ sheetId: pt.view.sheet.id, added: [pt.item], removed: [] })));
       }
-      detachLive();
+      for (const pt of parts) pt.liveEl.remove();
     } else if (d.kind === 'erase') {
-      const removed = [...d.removed.values()];
-      const added = [...d.pieces.values()];
-      d.view.hidden = null;
-      d.view.extra = null;
-      if (!cancelled && (removed.length || added.length)) await commit(d.view.sheet.id, added, removed);
-      else for (const it of removed) { const el = d.view.textEl(it.id); if (el) el.style.visibility = ''; }
-      d.view.renderInk();
+      await finishErase(d, cancelled);
     } else if (d.kind === 'lasso') {
       if (cancelled) detachLive(); else finishLasso(d);
     } else if (d.kind === 'transform') {
