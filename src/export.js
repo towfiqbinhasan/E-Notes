@@ -1,6 +1,6 @@
 // Export sheets to a PDF with the handwriting flattened in (pdf-lib).
 // Original PDF pages are embedded as vectors (sharp text); ink is drawn as vector paths.
-import { PDFDocument, rgb } from 'pdf-lib';
+import { PDFDocument, rgb, BlendMode } from 'pdf-lib';
 import { SHEET_W, itemAlpha, itemGeometry, pdfRect, notesRect, drawTextItems, PAPER_STEP } from './canvas.js';
 import { getPdfBytes, renderPageToCanvas } from './pdf.js';
 
@@ -118,6 +118,7 @@ export async function exportSheets(sheets, onProgress = () => {}) {
           color: hexToRgb(it.c),
           opacity: itemAlpha(it),
           borderWidth: 0,
+          blendMode: pass === 'hl' ? BlendMode.Multiply : BlendMode.Normal, // text under highlights stays dark
         });
       }
     }

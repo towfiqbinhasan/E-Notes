@@ -35,7 +35,7 @@ const DEFAULT_PRESETS = {
   ],
 };
 const SIZE_RANGE = { pen: [0.5, 20, 0.5], highlighter: [6, 60, 1], eraser: [6, 100, 2], text: [10, 64, 1] };
-const OPACITY_RANGE = { pen: [0.2, 1], highlighter: [0.1, 0.8] };
+const OPACITY_RANGE = { pen: [0.2, 1], highlighter: [0.2, 1] };
 const PRESET_TOOLS = ['pen', 'highlighter', 'text'];
 
 /** Upgrade older preferences (single colour per tool) to presets. */
@@ -47,6 +47,8 @@ export function migratePrefs(prefs) {
     if (prefs.text && prefs.text.color) Object.assign(prefs.presets.text[0], { c: prefs.text.color, s: prefs.text.size });
   }
   prefs.active = { pen: 0, highlighter: 0, text: 0, ...(prefs.active || {}) };
+  // Highlights are now multiplied with the page: the old pale default (0.35) becomes the new one.
+  for (const p of prefs.presets.highlighter || []) if (p.o === 0.35) p.o = HIGHLIGHT_ALPHA;
   const oldEraser = prefs.eraser || {};
   prefs.eraser = { size: oldEraser.size || 24, mode: oldEraser.mode || 'stroke', hlOnly: !!oldEraser.hlOnly };
   prefs.recentColors = Array.isArray(prefs.recentColors) ? prefs.recentColors : [];

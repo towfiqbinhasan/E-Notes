@@ -9,7 +9,7 @@ import { recognizeShape } from './shapes.js';
 
 /** Every sheet is 1000 units wide; strokes are stored in these units. */
 export const SHEET_W = 1000;
-export const HIGHLIGHT_ALPHA = 0.35;
+export const HIGHLIGHT_ALPHA = 0.6;   // highlights are multiplied with the page, so text under them stays dark
 
 // ---------------- geometry ----------------
 
@@ -19,7 +19,7 @@ const KINDS = {
   fountain: { thinning: 0.55, smoothing: 0.5, streamline: 0.45 },
   brush: { thinning: 0.82, smoothing: 0.62, streamline: 0.4, taper: true },
   pencil: { thinning: 0.3, smoothing: 0.4, streamline: 0.35 },
-  hl: { thinning: 0, smoothing: 0.5, streamline: 0.4 },
+  hl: { thinning: 0, smoothing: 0.65, streamline: 0.6, flat: true },   // chisel marker: even width, flat ends
 };
 
 const outlineCache = new WeakMap(); // item -> {path: string, p2d: Path2D, box}
@@ -36,8 +36,8 @@ function strokeOutline(item) {
     smoothing: o.smoothing,
     streamline: o.streamline,
     simulatePressure: !item.pr,
-    start: { cap: true, taper },
-    end: { cap: true, taper },
+    start: { cap: !o.flat, taper },
+    end: { cap: !o.flat, taper },
     last: true,
   });
 }
@@ -102,6 +102,52 @@ export function drawItem(ctx, it) {
   ctx.fillStyle = it.c;
   ctx.fill(g.p2d);
   ctx.restore();
+}
+
+let hlScratch = null; // reused offscreen canvas for highlight groups
+
+/**
+ * Draw highlights like a real marker: every colour group is painted at full strength first and then laid
+ * down once at its opacity, so overlapping strokes of one colour stay even (no darker blotches).
+ * The canvas itself is blended with "multiply" (CSS), so the text under a highlight stays crisp.
+ */
+function drawHighlights(ctx, items) {
+  const groups = new Map();
+  for (const it of items) {
+    const key = `${it.c}|${itemAlpha(it)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  const t = ctx.getTransform();
+  for (const group of groups.values()) {
+    const alpha = itemAlpha(group[0]);
+    if (group.length === 1) {
+      const g = itemGeometry(group[0]);
+      if (!g.p2d) continue;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = group[0].c;
+      ctx.fill(g.p2d);
+      ctx.restore();
+      continue;
+    }
+    if (!hlScratch) hlScratch = document.createElement('canvas');
+    if (hlScratch.width !== ctx.canvas.width || hlScratch.height !== ctx.canvas.height) {
+      hlScratch.width = ctx.canvas.width;
+      hlScratch.height = ctx.canvas.height;
+    }
+    const o = hlScratch.getContext('2d');
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.clearRect(0, 0, hlScratch.width, hlScratch.height);
+    o.setTransform(t);
+    o.fillStyle = group[0].c;
+    for (const it of group) { const g = itemGeometry(it); if (g.p2d) o.fill(g.p2d); }
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(hlScratch, 0, 0);
+    ctx.restore();
+  }
 }
 
 /** Draw text boxes onto a canvas scaled to sheet units (export and AI pictures). */
@@ -289,6 +335,7 @@ export class SheetView {
     if (!this.active) return;
     this.active = false;
     this.canvas.width = this.canvas.height = 0;
+    if (this.hlCanvas) this.hlCanvas.width = this.hlCanvas.height = 0;
     if (this.imgUrl) URL.revokeObjectURL(this.imgUrl);
     this.imgUrl = null;
     this.imgWidth = 0;
@@ -317,9 +364,23 @@ export class SheetView {
 
   renderInk() {
     if (!this.active) return;
-    const ctx = this.prepareCanvas(this.canvas);
     const extra = this.ghosts.size ? [...(this.extra || []), ...this.ghosts.values()] : this.extra;
-    drawItems(ctx, this.sheet.strokes, this.hidden, extra);
+    const all = extra && extra.length ? [...this.sheet.strokes, ...extra] : this.sheet.strokes;
+    const visible = (it) => !it.deleted_at && !(this.hidden && this.hidden.has(it.id));
+    const ctx = this.prepareCanvas(this.canvas);
+    for (const it of all) if (it.t === 'pen' && visible(it)) drawItem(ctx, it);
+    // Highlights live on their own canvas, blended with "multiply" (see .sheet-hl).
+    const hl = all.filter((it) => it.t === 'hl' && visible(it));
+    if (hl.length) {
+      if (!this.hlCanvas) {
+        this.hlCanvas = document.createElement('canvas');
+        this.hlCanvas.className = 'sheet-hl';
+        this.el.insertBefore(this.hlCanvas, this.canvas);
+      }
+      drawHighlights(this.prepareCanvas(this.hlCanvas), hl);
+    } else if (this.hlCanvas && this.hlCanvas.width) {
+      this.hlCanvas.width = this.hlCanvas.height = 0;
+    }
   }
 
   async loadPdf() {
@@ -525,6 +586,7 @@ export function createInput(opts) {
   function newLiveCanvas(view) {
     const c = document.createElement('canvas');
     c.className = 'sheet-live';
+    if (draw && draw.item && draw.item.t === 'hl') c.style.mixBlendMode = 'multiply'; // same look as when saved
     c.getContext('2d', { desynchronized: true }); // low-latency ink
     view.el.append(c);
     view.prepareCanvas(c);
@@ -653,6 +715,18 @@ export function createInput(opts) {
     if (!done && now - (draw.lastEmit || 0) < 120) return;
     draw.lastEmit = now;
     opts.onLiveInk({ sheetId: draw.view.sheet.id, item: { ...draw.item, p: draw.item.p.slice() }, done });
+  }
+
+  /** A highlighter stroke that was meant to be straight (small wobble only). */
+  function nearlyStraight(item) {
+    const p = item.p;
+    if (p.length < 9) return false;
+    const [x0, y0, x1, y1] = [p[0], p[1], p[p.length - 3], p[p.length - 2]];
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    if (len < item.s * 1.5) return false;
+    let dev = 0;
+    for (let i = 0; i < p.length; i += 3) dev = Math.max(dev, distToSegment(p[i], p[i + 1], x0, y0, x1, y1));
+    return dev <= Math.max(item.s * 0.6, len * 0.06);
   }
 
   function straighten(item) {
@@ -1013,7 +1087,7 @@ export function createInput(opts) {
     if (d.kind === 'ink') {
       clearTimeout(d.holdTimer);
       const parts = [...d.done, { view: d.view, item: d.item, liveEl: d.liveEl }];
-      if (d.straight && parts.length === 1) straighten(d.item);
+      if (parts.length === 1 && d.item.t === 'hl' && (d.straight || nearlyStraight(d.item))) straighten(d.item);
       const valid = parts.filter((pt) => pt.item.p.length);
       if (valid.length && !cancelled) {
         if (opts.onLiveInk) for (const pt of valid) opts.onLiveInk({ sheetId: pt.view.sheet.id, item: pt.item, done: true });
