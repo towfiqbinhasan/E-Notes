@@ -65,6 +65,15 @@ export async function exportSheets(sheets, onProgress = () => {}) {
   out.setProducer('E-Notes');
   out.setCreator('E-Notes');
   const sources = new Map(); // pdf_path -> PDFDocument | null (null = cannot embed, rasterize)
+  const pictures = new Map(); // data URL -> embedded image (the same screenshot is embedded once)
+
+  async function picture(src) {
+    if (!pictures.has(src)) {
+      const bytes = Uint8Array.from(atob(src.slice(src.indexOf(',') + 1)), (c) => c.charCodeAt(0));
+      pictures.set(src, await (src.startsWith('data:image/png') ? out.embedPng(bytes) : out.embedJpg(bytes)));
+    }
+    return pictures.get(src);
+  }
 
   async function sourceDoc(path) {
     if (!sources.has(path)) {
@@ -106,6 +115,16 @@ export async function exportSheets(sheets, onProgress = () => {}) {
     const page = out.addPage([W, H]);
     drawPaper(page, sheet, k, H);
     if (draw) draw(page, H);
+
+    // Pasted pictures: on the page, under the ink.
+    for (const it of sheet.strokes) {
+      if (it.t !== 'img' || it.deleted_at || !it.src) continue;
+      try {
+        page.drawImage(await picture(it.src), { x: it.x * k, y: H - (it.y + it.h) * k, width: it.w * k, height: it.h * k });
+      } catch (e) {
+        console.warn('Picture could not be exported', e);
+      }
+    }
 
     // Ink: highlighter first, then pen (same order as on screen).
     for (const pass of ['hl', 'pen']) {

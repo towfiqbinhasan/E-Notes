@@ -151,6 +151,7 @@
             <span id="sync-status" class="sync-status" title="Sync status"><i></i><span></span></span>
             <button class="icon-btn" id="btn-add-pdf" title="Add PDF (Ctrl+O)"></button>
             <button class="icon-btn" id="btn-add-sheet" title="Add blank sheet"></button>
+            <button class="icon-btn" id="btn-add-image" title="Insert picture / screenshot (or paste with Ctrl+V)"></button>
             <button class="icon-btn" id="btn-export" title="Export PDF (Ctrl+E)"></button>
             <button class="icon-btn" id="btn-find" title="Find in PDF and notes (Ctrl+F)"></button>
             <button class="icon-btn ai-btn" id="btn-ai" title="AI helper (free)"></button>
@@ -373,6 +374,7 @@
 
     <div id="toasts" class="toasts" aria-live="polite"></div>
     <input id="file-input" type="file" accept="application/pdf,.pdf" multiple hidden />
+    <input id="image-input" type="file" accept="image/*" multiple hidden />
 
     <script type="module" src="/src/main.js"></script>
   </body>

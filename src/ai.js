@@ -2,7 +2,7 @@
 //  - Offline tools run on the device, no account or key: read aloud, key points, page text.
 //  - Gemini tools use the user's own free Google AI Studio key (stored only on this device):
 //    handwriting -> text, summarize, explain, quiz, translate and questions about the sheet.
-import { SHEET_W, pdfRect, drawItems, drawTextItems } from './canvas.js';
+import { SHEET_W, pdfRect, drawItems, drawTextItems, drawImageItems } from './canvas.js';
 import { renderPageToCanvas, getPageText } from './pdf.js';
 import { addSheets, getSheet, uid } from './store.js';
 import { commit } from './history.js';
@@ -68,6 +68,7 @@ async function sheetCanvas(sheet, width) {
     page.width = page.height = 0;
   }
   ctx.scale(k, k);
+  await drawImageItems(ctx, sheet.strokes);
   drawItems(ctx, sheet.strokes);
   drawTextItems(ctx, sheet.strokes);
   return canvas;
@@ -454,6 +455,8 @@ function bottomOfContent(sheet, x0, x1) {
     if (it.t === 'text') {
       const w = it.w ?? SHEET_W - it.x;
       if (it.x < x1 && it.x + w > x0) bottom = Math.max(bottom, it.y + estimateHeight(it.text || '', w, it.s));
+    } else if (it.t === 'img') {
+      if (it.x < x1 && it.x + it.w > x0) bottom = Math.max(bottom, it.y + it.h);
     } else if (it.p) {
       for (let i = 0; i < it.p.length; i += 3) {
         if (it.p[i] >= x0 && it.p[i] <= x1) bottom = Math.max(bottom, it.p[i + 1] + it.s);

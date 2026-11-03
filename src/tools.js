@@ -34,7 +34,7 @@ const DEFAULT_PRESETS = {
     { c: '#2563eb', s: 22 },
   ],
 };
-const SIZE_RANGE = { pen: [0.5, 20, 0.5], highlighter: [6, 60, 1], eraser: [6, 100, 2], text: [10, 64, 1] };
+const SIZE_RANGE = { pen: [0.5, 20, 0.5], highlighter: [6, 60, 1], eraser: [6, 100, 2], text: [8, 120, 1] };
 const OPACITY_RANGE = { pen: [0.2, 1], highlighter: [0.2, 1] };
 const PRESET_TOOLS = ['pen', 'highlighter', 'text'];
 
@@ -82,7 +82,7 @@ function dotSize(tool, s) {
 /**
  * opts: { prefs, savePrefs, onChange() (style changed), onClearSheet() }
  */
-export function initPresets({ prefs, savePrefs, onChange, onClearSheet }) {
+export function initPresets({ prefs, savePrefs, onChange, onClearSheet, onSize = () => {} }) {
   const bar = $('presets');
   const pop = $('tool-popover');
   let popFor = null; // {tool, index} the popover is editing
@@ -139,6 +139,7 @@ export function initPresets({ prefs, savePrefs, onChange, onClearSheet }) {
         changed();
       };
       bar.append(remove);
+      quickSize(tool);
     } else if (tool === 'eraser') {
       const e = prefs.eraser;
       const b = document.createElement('button');
@@ -148,8 +149,9 @@ export function initPresets({ prefs, savePrefs, onChange, onClearSheet }) {
       b.innerHTML = `<span class="dot ring" style="width:${d}px;height:${d}px"></span><span class="preset-label">${e.mode === 'partial' ? 'Precise' : 'Whole stroke'}${e.hlOnly ? ' · highlighter' : ''}</span><span class="chev">▾</span>`;
       b.onclick = () => openPopover('eraser', 0, b);
       bar.append(b);
+      quickSize(tool);
     } else {
-      const hint = { lasso: 'Draw around ink to select it', laser: 'Laser pointer: fades away', hand: 'Drag to scroll' }[tool];
+      const hint = { lasso: 'Draw around ink, or tap a picture, to select it', laser: 'Laser pointer: fades away', hand: 'Drag to scroll' }[tool];
       if (hint) bar.innerHTML = `<span class="muted small preset-hint">${hint}</span>`;
     }
     if (popFor && !pop.hidden) {
@@ -157,6 +159,69 @@ export function initPresets({ prefs, savePrefs, onChange, onClearSheet }) {
       const anchor = popFor.tool === 'eraser' ? bar.children[0] : bar.children[popFor.index];
       if (anchor) place(anchor);
     }
+  }
+
+  // ---------- quick size (change thickness while writing, without opening the popover) ----------
+
+  /** The object and key holding the size of the current tool. */
+  function sizeTarget(tool) {
+    if (tool === 'eraser') return [prefs.eraser, 'size'];
+    const p = activePreset(prefs, tool);
+    return p ? [p, 's'] : [null];
+  }
+
+  function quickSize(tool) {
+    const [obj, key] = sizeTarget(tool);
+    if (!obj) return;
+    const [min, max, step] = SIZE_RANGE[tool];
+    const wrap = document.createElement('div');
+    wrap.className = 'quick-size';
+    wrap.title = tool === 'text'
+      ? 'Text size: the box you are writing (or just wrote) and new ones. Ctrl+Shift+> / < while typing'
+      : 'Thickness ( [ and ] keys )';
+    wrap.innerHTML = `<button class="qs-btn" aria-label="Thinner">−</button><input type="range" min="${min}" max="${max}" step="${step}" aria-label="Size"><b></b><button class="qs-btn" aria-label="Thicker">+</button>`;
+    const [minus, plus] = wrap.querySelectorAll('button');
+    const range = wrap.querySelector('input');
+    const out = wrap.querySelector('b');
+    range.value = obj[key];
+    out.textContent = obj[key];
+    // Live while dragging (no re-render, so the slider keeps the pointer); tidy up on release.
+    range.oninput = () => {
+      obj[key] = Number(range.value);
+      out.textContent = obj[key];
+      const dot = bar.querySelector('.preset.active .dot');
+      if (dot && tool !== 'eraser') { const d = dotSize(tool, obj[key]); dot.style.width = dot.style.height = `${d}px`; }
+      savePrefs();
+      onChange();
+      onSize(tool, obj[key], false);
+    };
+    range.onchange = () => { onSize(tool, obj[key], true); render(); };
+    minus.onclick = () => bumpSize(-1);
+    plus.onclick = () => bumpSize(1);
+    bar.append(wrap);
+  }
+
+  /** One step thinner (-1) or thicker (+1) for the current tool. */
+  function bumpSize(dir) {
+    const tool = prefs.tool;
+    if (!SIZE_RANGE[tool]) return false;
+    const [obj, key] = sizeTarget(tool);
+    if (!obj) return false;
+    const [min, max, step] = SIZE_RANGE[tool];
+    const by = tool === 'pen' ? (obj[key] < 3 ? 0.5 : 1) : step * 2;
+    obj[key] = Math.round(Math.max(min, Math.min(max, obj[key] + dir * by)) * 10) / 10;
+    changed();
+    onSize(tool, obj[key], true);
+    return true;
+  }
+
+  /** Show `size` as the current text size (an existing text box was opened for editing). */
+  function showTextSize(size) {
+    const p = activePreset(prefs, 'text');
+    if (!p || p.s === size) return;
+    p.s = size;
+    savePrefs();
+    if (prefs.tool === 'text') render();
   }
 
   // ---------- popover ----------
@@ -349,5 +414,5 @@ export function initPresets({ prefs, savePrefs, onChange, onClearSheet }) {
   }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) close(); });
 
-  return { render, close, isOpen: () => !pop.hidden };
+  return { render, close, bumpSize, showTextSize, isOpen: () => !pop.hidden };
 }

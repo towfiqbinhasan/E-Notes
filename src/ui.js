@@ -1,7 +1,7 @@
 // App UI: sidebar, toolbar, sheet list, zoom, import/export, settings, shortcuts.
 import * as store from './store.js';
 import { undo, redo, canUndo, canRedo, onHistoryChange, clearHistory, commit } from './history.js';
-import { SheetView, SHEET_W, createInput, pdfRect, setTextDefaults, PAPERS } from './canvas.js';
+import { SheetView, SHEET_W, createInput, pdfRect, setTextDefaults, setTextHooks, resizeCurrentText, PAPERS, pictureToDataUrl } from './canvas.js';
 import { migratePrefs, toolStyle, initPresets } from './tools.js';
 import { importPdf } from './pdf.js';
 import { exportSheets, safeFileName } from './export.js';
@@ -25,6 +25,7 @@ const ICONS = {
   redo: svg('<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
   pdf: svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9 14h6"/>'),
   sheet: svg('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M12 9v6M9 12h6"/>'),
+  image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-9 9"/>'),
   export: svg('<path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>'),
   sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: svg('<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>'),
@@ -147,6 +148,7 @@ export function initUI(opts) {
   $('btn-menu').innerHTML = ICONS.menu;
   $('btn-add-pdf').innerHTML = ICONS.pdf;
   $('btn-add-sheet').innerHTML = ICONS.sheet;
+  $('btn-add-image').innerHTML = ICONS.image;
   $('btn-export').innerHTML = ICONS.export;
   $('btn-undo').innerHTML = ICONS.undo;
   $('btn-redo').innerHTML = ICONS.redo;
@@ -506,6 +508,7 @@ export function initUI(opts) {
     prefs,
     savePrefs,
     onChange: () => updateCursor(),
+    onSize: (tool, size, final) => { if (tool === 'text') resizeCurrentText(size, final); },
     onClearSheet: () => {
       const v = centerView();
       if (!v) return;
@@ -545,6 +548,7 @@ export function initUI(opts) {
   };
   for (const b of document.querySelectorAll('.tool')) b.onclick = () => setTool(b.dataset.tool);
   setTextDefaults(() => { const t = toolStyle(prefs, 'text'); return { color: t.color, size: t.size }; });
+  setTextHooks({ bump: (dir) => presets.bumpSize(dir), focused: (size) => presets.showTextSize(size) });
 
   const input = createInput({
     viewport,
@@ -582,9 +586,26 @@ export function initUI(opts) {
     return id;
   }
 
+  /** Pictures (screenshots) go onto the sheet in view, on top of the PDF. */
+  async function insertImages(files) {
+    if (!centerView()) { toast('Open a PDF or add a sheet first, then add the picture', { error: true }); return; }
+    for (const f of files) {
+      try {
+        await input.insertImage(await pictureToDataUrl(f));
+      } catch (err) {
+        console.error(err);
+        toast(err.message || String(err), { error: true });
+      }
+    }
+    toast('Drag the picture to move it, the round corner handle (or − / +) to resize');
+  }
+  const isImageFile = (f) => /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name);
+
   async function importFiles(files) {
+    const images = [...files].filter(isImageFile);
+    if (images.length) await insertImages(images);
     const pdfs = [...files].filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name));
-    if (!pdfs.length) { toast('Only PDF files can be added', { error: true }); return; }
+    if (!pdfs.length) { if (!images.length) toast('Only PDF files and pictures can be added', { error: true }); return; }
     const baseName = pdfs[0].name.replace(/\.pdf$/i, '');
     const nbId = await ensureNotebook(baseName);
     // Name an empty "Untitled" notebook after the first PDF.
@@ -631,6 +652,19 @@ export function initUI(opts) {
   const pickPdf = () => fileInput.click();
   fileInput.onchange = () => { if (fileInput.files.length) importFiles(fileInput.files); fileInput.value = ''; };
   $('btn-add-pdf').onclick = pickPdf;
+  const imageInput = $('image-input');
+  imageInput.onchange = () => { if (imageInput.files.length) insertImages([...imageInput.files]); imageInput.value = ''; };
+  $('btn-add-image').onclick = () => imageInput.click();
+
+  // Ctrl+V: a screenshot on the system clipboard becomes a picture; otherwise paste copied ink.
+  document.addEventListener('paste', (e) => {
+    // (The AI panel takes screenshots pasted inside it.)
+    if (e.defaultPrevented || isTyping(e.target) || document.querySelector('dialog[open]')) return;
+    const files = [...(e.clipboardData?.items || [])].filter((i) => i.kind === 'file' && i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
+    e.preventDefault();
+    if (files.length) insertImages(files);
+    else if (input.hasClipboard()) input.paste();
+  });
   $('empty-add-pdf').onclick = pickPdf;
   $('btn-add-sheet').onclick = () => addBlankSheet();
   $('empty-add-sheet').onclick = () => addBlankSheet();
@@ -908,11 +942,22 @@ export function initUI(opts) {
     'tool:laser': () => setTool('laser'),
     copy: () => input.copySelection(),
     cut: () => input.cutSelection(),
-    paste: () => input.paste(),
+    paste: () => pasteCommand(),
     duplicate: () => input.duplicateSelection(),
     delete: () => input.deleteSelection(),
   };
   if (desktop) desktop.onMenu((cmd) => commands[cmd] && commands[cmd]());
+
+  // Paste from a menu (no paste event): read a picture from the clipboard if we may.
+  async function pasteCommand() {
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((t) => t.startsWith('image/'));
+        if (type) { await insertImages([await item.getType(type)]); return; }
+      }
+    } catch { /* no clipboard access: fall back to copied ink */ }
+    input.paste();
+  }
 
   const isTyping = (t) => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
   document.addEventListener('keydown', (e) => {
@@ -927,7 +972,6 @@ export function initUI(opts) {
       else if (k === 'c' && input.hasSelection()) cmd = 'copy';
       else if (k === 'x' && input.hasSelection()) cmd = 'cut';
       else if (k === 'd' && input.hasSelection()) cmd = 'duplicate';
-      else if (k === 'v' && input.hasClipboard()) cmd = 'paste';
       // In Electron these come from the native menu instead.
       else if (!isElectron) {
         if (k === '=' || k === '+') cmd = 'zoom-in';
@@ -940,6 +984,7 @@ export function initUI(opts) {
     } else if (!e.altKey) {
       cmd = { p: 'tool:pen', h: 'tool:highlighter', e: 'tool:eraser', t: 'tool:text', v: 'tool:hand', l: 'tool:lasso', k: 'tool:laser' }[k] || null;
       if ((k === 'delete' || k === 'backspace') && input.hasSelection()) cmd = 'delete';
+      if (k === '[' || k === ']') { e.preventDefault(); presets.bumpSize(k === ']' ? 1 : -1); return; }
       if (e.code === 'Space') {
         e.preventDefault();
         if (!spaceHeld) { spaceHeld = true; viewport.classList.add('tool-hand'); }

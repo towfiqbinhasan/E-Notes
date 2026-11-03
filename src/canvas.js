@@ -1,6 +1,6 @@
 // Drawing: stroke geometry (perfect-freehand), per-sheet views, and pointer input
 // (pen/mouse draw, finger scrolls and pinch-zooms, palm rejection, S Pen button = eraser,
-// precise eraser, lasso selection, hold-to-shape, laser pointer).
+// precise eraser, lasso selection, hold-to-shape, laser pointer, pasted pictures).
 import { getStroke } from 'perfect-freehand';
 import { getPageImage } from './pdf.js';
 import { uid } from './store.js';
@@ -179,6 +179,67 @@ export function drawTextItems(ctx, items) {
   ctx.restore();
 }
 
+/** Pictures (pasted screenshots) are items too: {t: 'img', x, y, w, h, src: data URL}. */
+const isImage = (it) => it.t === 'img' && !it.deleted_at && it.src;
+
+const imageCache = new Map(); // src -> Promise<HTMLImageElement>
+function loadImage(src) {
+  if (!imageCache.has(src)) {
+    const p = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Picture could not be read'));
+      img.src = src;
+    });
+    p.catch(() => imageCache.delete(src));
+    imageCache.set(src, p);
+  }
+  return imageCache.get(src);
+}
+
+/** Draw the pictures of a sheet onto a canvas scaled to sheet units (AI pictures). */
+export async function drawImageItems(ctx, items) {
+  for (const it of items) {
+    if (!isImage(it)) continue;
+    try { ctx.drawImage(await loadImage(it.src), it.x, it.y, it.w, it.h); } catch { /* skip broken picture */ }
+  }
+}
+
+/**
+ * Any picture (file, pasted screenshot) -> {src: data URL, w, h} at most `max` px on its long side.
+ * Small pictures stay PNG (sharp text); big ones become JPEG so the sheet stays quick to sync.
+ */
+export async function pictureToDataUrl(blob, max = 1600) {
+  const url = URL.createObjectURL(blob);
+  let img;
+  try {
+    img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('This picture format cannot be read. Try a PNG or JPG.'));
+      el.src = url;
+    });
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.naturalWidth * k));
+  c.height = Math.max(1, Math.round(img.naturalHeight * k));
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0, c.width, c.height);
+  let src = c.toDataURL('image/png');
+  if (src.length > 400_000) {
+    ctx.globalCompositeOperation = 'destination-over'; // transparent parts become white in a JPEG
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    src = c.toDataURL('image/jpeg', 0.9);
+  }
+  const out = { src, w: c.width, h: c.height };
+  c.width = c.height = 0;
+  return out;
+}
+
 function distToSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const len = dx * dx + dy * dy;
@@ -278,6 +339,9 @@ export class SheetView {
     this.img.draggable = false;
     this.pdfBox.append(this.img);
 
+    this.imgLayer = document.createElement('div');
+    this.imgLayer.className = 'sheet-imgs';
+
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'sheet-ink';
 
@@ -290,7 +354,8 @@ export class SheetView {
     this.menuBtn.textContent = '⋯';
     this.menuBtn.addEventListener('click', (e) => { e.stopPropagation(); onMenu(this, this.menuBtn); });
 
-    this.el.append(this.paper, this.pdfBox, this.canvas, this.textLayer, this.menuBtn);
+    // Pictures sit under the ink, so you can write on top of a pasted screenshot.
+    this.el.append(this.paper, this.pdfBox, this.imgLayer, this.canvas, this.textLayer, this.menuBtn);
     this.applySheetLayout();
   }
 
@@ -327,6 +392,7 @@ export class SheetView {
     if (this.active) return;
     this.active = true;
     this.renderInk();
+    this.renderImages();
     this.renderTexts();
     this.loadPdf();
   }
@@ -336,6 +402,7 @@ export class SheetView {
     this.active = false;
     this.canvas.width = this.canvas.height = 0;
     if (this.hlCanvas) this.hlCanvas.width = this.hlCanvas.height = 0;
+    this.imgLayer.textContent = '';
     if (this.imgUrl) URL.revokeObjectURL(this.imgUrl);
     this.imgUrl = null;
     this.imgWidth = 0;
@@ -416,6 +483,38 @@ export class SheetView {
     }
   }
 
+  renderImages() {
+    this.imgLayer.textContent = '';
+    for (const it of this.sheet.strokes) {
+      if (!isImage(it)) continue;
+      const el = document.createElement('img');
+      el.className = 'sheet-img';
+      el.dataset.id = it.id;
+      el.alt = '';
+      el.draggable = false;
+      el.src = it.src;
+      Object.assign(el.style, {
+        left: `calc(${it.x}px * var(--z))`, top: `calc(${it.y}px * var(--z))`,
+        width: `calc(${it.w}px * var(--z))`, height: `calc(${it.h}px * var(--z))`,
+      });
+      this.imgLayer.append(el);
+    }
+  }
+
+  imageEl(id) {
+    return this.imgLayer.querySelector(`.sheet-img[data-id="${id}"]`);
+  }
+
+  /** Topmost picture under a point (sheet units). */
+  imageAt(x, y) {
+    const list = this.sheet.strokes;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const it = list[i];
+      if (isImage(it) && x >= it.x && x <= it.x + it.w && y >= it.y && y <= it.y + it.h) return it;
+    }
+    return null;
+  }
+
   renderTexts() {
     const focused = this.textLayer.querySelector('.textbox:focus');
     const keep = focused ? focused.dataset.id : null;
@@ -443,6 +542,7 @@ export class SheetView {
     }
     if (this.active) {
       this.renderInk();
+      this.renderImages();
       this.renderTexts();
       this.loadPdf();
     }
@@ -490,6 +590,40 @@ export class SheetView {
 
 let textDefaults = () => ({ color: '#111827', size: 22 });
 export const setTextDefaults = (fn) => { textDefaults = fn; };
+let textHooks = { bump() {}, focused() {} };
+/** bump(dir): Ctrl+Shift+> / < while typing. focused(size): a text box started editing. */
+export const setTextHooks = (hooks) => { textHooks = { ...textHooks, ...hooks }; };
+
+// The text box being written, or the one just written: the size control resizes it
+// until you tap somewhere else.
+let currentText = null; // {view, id}
+let textSaving = Promise.resolve(); // a closed text box being saved
+function setCurrentText(view, id) {
+  if (currentText) { const old = currentText.view.textEl(currentText.id); if (old) old.classList.remove('current'); }
+  currentText = id ? { view, id } : null;
+  if (currentText) { const el = view.textEl(id); if (el) el.classList.add('current'); }
+}
+export const clearCurrentText = () => setCurrentText(null, null);
+
+/** Change the size of the current text box. `final` = save it (else only show it). */
+export async function resizeCurrentText(size, final = true) {
+  if (!currentText) return false;
+  // Touching the size control closes the box first: let it finish saving.
+  if (!document.activeElement || !document.activeElement.classList.contains('textbox')) await textSaving;
+  if (!currentText) return false;
+  const { view, id } = currentText;
+  const el = view.textEl(id);
+  if (el) el.style.fontSize = `calc(${size}px * var(--z))`;
+  // Still typing: saved together with the text when the box closes.
+  if (el && el === document.activeElement) { el.dataset.size = size; return true; }
+  const item = view.sheet.strokes.find((it) => it.id === id && !it.deleted_at);
+  if (!item) return false;
+  if (!final || item.s === size) return true;
+  const copy = { ...item, id: uid(), s: size };
+  currentText = { view, id: copy.id };
+  await commit(view.sheet.id, [copy], [item]);
+  return true;
+}
 
 function makeTextBox(view, item, isNew = false) {
   const el = document.createElement('div');
@@ -504,21 +638,34 @@ function makeTextBox(view, item, isNew = false) {
   el.style.fontSize = `calc(${item.s}px * var(--z))`;
   el.style.color = item.c;
   el.textContent = item.text || '';
+  if (currentText && currentText.id === item.id) el.classList.add('current');
+
+  el.addEventListener('focus', () => {
+    setCurrentText(view, item.id);
+    textHooks.focused(item.s);
+  });
 
   el.addEventListener('blur', async () => {
     const text = el.innerText.replace(/\n+$/, '');
-    if (text === (item.text || '')) {
-      if (isNew) el.remove();
+    const size = Number(el.dataset.size) || item.s;
+    if (text === (item.text || '') && size === item.s) {
+      if (isNew) { el.remove(); if (currentText && currentText.id === item.id) clearCurrentText(); }
       return;
     }
     // Edits create a new item and tombstone the old one (keeps sync conflict-free).
-    const added = text.trim() ? [{ ...item, id: uid(), text, created: isNew ? item.created : Date.now() }] : [];
+    const added = text.trim() ? [{ ...item, id: uid(), text, s: size, created: isNew ? item.created : Date.now() }] : [];
     const removed = isNew ? [] : [item];
     el.remove();
-    if (added.length || removed.length) await commit(view.sheet.id, added, removed);
+    setCurrentText(view, added.length ? added[0].id : null);
+    if (added.length || removed.length) await (textSaving = commit(view.sheet.id, added, removed));
   });
   el.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.preventDefault(); el.blur(); }
+    // Ctrl+Shift+> / < : bigger / smaller text (like a word processor).
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.code === 'Period' || e.code === 'Comma')) {
+      e.preventDefault();
+      textHooks.bump(e.code === 'Period' ? 1 : -1);
+    }
     e.stopPropagation(); // keep tool shortcuts out of the text
   });
   return el;
@@ -535,6 +682,7 @@ function createTextBox(view, x, y) {
 
 /** Bounding box of an item in sheet units. */
 function itemBox(view, it) {
+  if (it.t === 'img') return { minX: it.x, minY: it.y, maxX: it.x + it.w, maxY: it.y + it.h };
   if (it.t !== 'text') return itemGeometry(it).box;
   const el = view.textEl(it.id);
   if (el && el.offsetWidth) {
@@ -554,6 +702,9 @@ function transformItem(it, { dx = 0, dy = 0, f = 1, ox = 0, oy = 0 }, keepCreate
   if (it.t === 'text') {
     copy.x = mx(it.x); copy.y = my(it.y);
     if (f !== 1) { copy.s = Math.max(6, Math.round(it.s * f)); if (it.w) copy.w = Math.round(it.w * f); }
+  } else if (it.t === 'img') {
+    copy.x = mx(it.x); copy.y = my(it.y);
+    if (f !== 1) { copy.w = Math.max(8, Math.round(it.w * f * 10) / 10); copy.h = Math.max(8, Math.round(it.h * f * 10) / 10); }
   } else {
     const p = new Array(it.p.length);
     for (let i = 0; i < it.p.length; i += 3) { p[i] = mx(it.p[i]); p[i + 1] = my(it.p[i + 1]); p[i + 2] = it.p[i + 2]; }
@@ -881,6 +1032,8 @@ export function createInput(opts) {
       if (it.t === 'text') {
         const b = itemBox(d.view, it);
         if (pointInPolygon((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, poly) || pointInPolygon(it.x + 6, it.y + it.s * 0.6, poly)) chosen.push(it);
+      } else if (isImage(it)) {
+        if (pointInPolygon(it.x + it.w / 2, it.y + it.h / 2, poly)) chosen.push(it);
       } else if (isInk(it)) {
         let inside = 0;
         const n = it.p.length / 3;
@@ -922,7 +1075,9 @@ export function createInput(opts) {
     btn('Duplicate', 'Duplicate (Ctrl+D)', () => duplicateSelection());
     btn('Copy', 'Copy (Ctrl+C)', () => copySelection());
     btn('Cut', 'Cut (Ctrl+X)', () => cutSelection());
-    for (const c of SEL_COLORS) btn(`<span class="sel-swatch" style="background:${c}"></span>`, `Colour ${c}`, () => recolorSelection(c), 'swatch-btn');
+    btn('−', 'Smaller (or drag the round handle)', () => scaleSelection(1 / 1.2), 'size-btn');
+    btn('+', 'Bigger (or drag the round handle)', () => scaleSelection(1.2), 'size-btn');
+    if (items.some((it) => it.t !== 'img')) for (const c of SEL_COLORS) btn(`<span class="sel-swatch" style="background:${c}"></span>`, `Colour ${c}`, () => recolorSelection(c), 'swatch-btn');
     view.el.append(boxEl, barEl);
     sel = { view, items, box, boxEl, barEl };
     placeSelection();
@@ -972,6 +1127,8 @@ export function createInput(opts) {
   function copySelection() {
     if (!sel) return false;
     clipboard = sel.items.map((it) => JSON.parse(JSON.stringify(it)));
+    // So Ctrl+V pastes this ink rather than an older screenshot still on the system clipboard.
+    try { navigator.clipboard.writeText('').catch(() => {}); } catch { /* no clipboard access */ }
     opts.onToast(`Copied ${clipboard.length} item${clipboard.length === 1 ? '' : 's'}`);
     return true;
   }
@@ -980,13 +1137,40 @@ export function createInput(opts) {
   }
   async function recolorSelection(c) {
     if (!sel) return;
-    await replaceSelection(sel.items.map((it) => ({ ...transformItem(it, {}), c })));
+    await replaceSelection(sel.items.map((it) => (it.t === 'img' ? transformItem(it, {}) : { ...transformItem(it, {}), c })));
+  }
+  async function scaleSelection(f) {
+    if (!sel) return;
+    const { box } = sel;
+    await replaceSelection(sel.items.map((it) => transformItem(it, { f, ox: box.x, oy: box.y })));
+  }
+
+  /** Put a picture ({src, w, h} in pixels) on the sheet in view, selected so it can be moved and resized. */
+  async function insertImage(pic, view = opts.centerView()) {
+    if (!view) return false;
+    const dpr = window.devicePixelRatio || 1;
+    // Screen-sized at first, but never wider than half the sheet or taller than the sheet.
+    let w = Math.min(pic.w / dpr, SHEET_W * 0.5);
+    let h = (w * pic.h) / pic.w;
+    if (h > view.sheet.height * 0.8) { h = view.sheet.height * 0.8; w = (h * pic.w) / pic.h; }
+    const vr = viewport.getBoundingClientRect(), sr = view.el.getBoundingClientRect();
+    const mid = view.toUnits((Math.max(vr.left, sr.left) + Math.min(vr.right, sr.right)) / 2, 0, sr).x;
+    const top = view.toUnits(0, Math.max(vr.top, sr.top) + 40, sr).y;
+    const x = Math.max(0, Math.min(SHEET_W - w, mid - w / 2));
+    const y = Math.max(0, Math.min(view.sheet.height - h, top));
+    const r = (n) => Math.round(n * 10) / 10;
+    const item = { id: uid(), t: 'img', x: r(x), y: r(y), w: r(w), h: r(h), src: pic.src, created: Date.now() };
+    opts.setTool('lasso');
+    await commit(view.sheet.id, [item], []);
+    select(view, [item]);
+    return true;
   }
   async function paste(view = opts.centerView()) {
     if (!clipboard || !clipboard.length || !view) return false;
     let minX = Infinity, minY = Infinity, maxX = -Infinity;
     for (const it of clipboard) {
-      const b = it.t === 'text' ? { minX: it.x, minY: it.y, maxX: it.x + (it.w || 200) } : itemGeometry(it).box;
+      const b = it.t === 'text' ? { minX: it.x, minY: it.y, maxX: it.x + (it.w || 200) }
+        : it.t === 'img' ? { minX: it.x, minY: it.y, maxX: it.x + it.w } : itemGeometry(it).box;
       minX = Math.min(minX, b.minX); minY = Math.min(minY, b.minY); maxX = Math.max(maxX, b.maxX);
     }
     // Put it near the top of the visible part of the target sheet, slightly offset.
@@ -1008,7 +1192,8 @@ export function createInput(opts) {
     draw = {
       kind: 'transform', mode, id: e.pointerId, view, pointerType: e.pointerType,
       sx: e.clientX, sy: e.clientY, dx: 0, dy: 0, f: 1, ox: box.x, oy: box.y,
-      ink: items.filter((it) => it.t !== 'text'), texts: items.filter((it) => it.t === 'text'),
+      ink: items.filter((it) => it.t === 'pen' || it.t === 'hl'), texts: items.filter((it) => it.t === 'text'),
+      imgs: items.filter((it) => it.t === 'img'),
     };
     view.hidden = new Set(items.map((it) => it.id));
     view.renderInk();
@@ -1044,6 +1229,16 @@ export function createInput(opts) {
         el.style.transform = `translate(${tx}px, ${ty}px) scale(${d.f})`;
       }
     }
+    for (const it of d.imgs) {
+      const el = d.view.imageEl(it.id);
+      if (!el) continue;
+      el.style.transformOrigin = '0 0';
+      if (d.mode === 'move') el.style.transform = `translate(${d.dx * z}px, ${d.dy * z}px)`;
+      else {
+        const tx = (d.ox + (it.x - d.ox) * d.f - it.x) * z, ty = (d.oy + (it.y - d.oy) * d.f - it.y) * z;
+        el.style.transform = `translate(${tx}px, ${ty}px) scale(${d.f})`;
+      }
+    }
     const b = sel.box;
     placeSelection(d.mode === 'move'
       ? { ...b, x: b.x + d.dx, y: b.y + d.dy }
@@ -1055,6 +1250,7 @@ export function createInput(opts) {
     const moved = d.mode === 'move' ? Math.hypot(d.dx, d.dy) > 0.5 : Math.abs(d.f - 1) > 0.01;
     if (cancelled || !moved) {
       for (const it of d.texts) { const el = d.view.textEl(it.id); if (el) el.style.transform = ''; }
+      for (const it of d.imgs) { const el = d.view.imageEl(it.id); if (el) el.style.transform = ''; }
       d.view.renderInk();
       if (sel) placeSelection();
       return;
@@ -1147,6 +1343,9 @@ export function createInput(opts) {
       if (sel && e.target.closest('.sel-handle')) { startTransform(e, 'resize'); return true; }
       if (sel && e.target.closest('.sel-box')) { startTransform(e, 'move'); return true; }
       if (!view) { clearSelection(); return false; }
+      const pt = view.toUnits(e.clientX, e.clientY);
+      const pic = view.imageAt(pt.x, pt.y);
+      if (pic) { select(view, [pic]); startTransform(e, 'move'); return true; }
       startLasso(e, view);
       return true;
     }
@@ -1155,6 +1354,13 @@ export function createInput(opts) {
     else if (tool === 'pen' || tool === 'highlighter') startInk(e, view, tool);
     else return false;
     return true;
+  }
+
+  function pictureUnder(e) {
+    const view = opts.findView(e.target);
+    if (!view) return null;
+    const pt = view.toUnits(e.clientX, e.clientY);
+    return view.imageAt(pt.x, pt.y);
   }
 
   // ================= finger gestures =================
@@ -1209,6 +1415,7 @@ export function createInput(opts) {
   // ================= event wiring =================
   viewport.addEventListener('pointerdown', (e) => {
     if (e.target.closest('.sheet-menu-btn, .sheet-add, .sel-bar, button, input, select, a')) return;
+    if (!e.target.closest('.textbox.current')) clearCurrentText();
     const tool = opts.getTool();
     const onText = e.target.closest('.textbox');
     if (e.pointerType === 'pen') lastPenTime = performance.now();
@@ -1218,7 +1425,9 @@ export function createInput(opts) {
       if (draw && draw.pointerType === 'pen') return;
       if (performance.now() - lastPenTime < 500) return;
       const canFingerDraw = opts.fingerDraw() && touches.size === 0 && tool !== 'hand' && tool !== 'text';
-      if (canFingerDraw && !onText && !draw) {
+      // With the lasso, a finger on a picture or on the selection moves / resizes it (no stylus needed).
+      const grabs = tool === 'lasso' && touches.size === 0 && (e.target.closest('.sel-box') || pictureUnder(e));
+      if ((canFingerDraw || grabs) && !onText && !draw) {
         touches.set(e.pointerId, { x: e.clientX, y: e.clientY, drawing: true });
         viewport.setPointerCapture(e.pointerId);
         if (startTool(e, opts.findView(e.target))) return;
@@ -1331,6 +1540,7 @@ export function createInput(opts) {
     copySelection,
     cutSelection,
     paste,
+    insertImage,
     hasClipboard: () => !!(clipboard && clipboard.length),
     /** Zoom changed: move the selection's action bar. */
     relayout() { if (sel && !draw) placeSelection(); },
