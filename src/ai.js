@@ -714,6 +714,8 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
       history = [];
       clearAttachment();
     }
+    // Phones: open the sheet fully so the answer is visible (drag it down to get back to the page).
+    if (isPhone()) setSize('full');
     bubble('user', label, '', pic);
     const waiting = bubble('assistant', pic ? 'Looking at the picture…' : sheet ? 'Reading the sheet…' : 'Thinking…', 'waiting');
     const status = (msg) => { waiting.querySelector('.ai-text').textContent = msg; };
@@ -754,6 +756,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
       waiting.classList.remove('waiting');
       waiting.querySelector('.ai-text').textContent = res.text;
       answerButtons(waiting, res.text, sheet, res.provider);
+      log.scrollTop = log.scrollHeight;
       if (res.truncated) bubble('assistant', 'The answer was cut off because it was very long.', 'note');
       history.push({ role: 'user', content: prompt }, { role: 'assistant', content: res.text });
       history = history.slice(-12);
@@ -900,6 +903,8 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     if (!q && !attached) return;
     if (!q) q = 'What is in this picture? Explain it simply.';
     input.value = '';
+    // Phones: put the keyboard away so the answer has room.
+    if (isPhone()) input.blur();
     ask('ask', q, q);
   };
   input.addEventListener('keydown', (e) => {
@@ -913,8 +918,65 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast, sheetAt }) {
     panel.hidden = !open;
     $('btn-ai').classList.toggle('active', open);
     if (!open) stopSpeaking();
-    if (open) refreshHeader();
+    if (open) { refreshHeader(); setSize('half'); }
   }
+
+  // ----- phones: the panel is a bottom sheet that can be dragged between three sizes -----
+  const phoneQuery = matchMedia('(max-width: 820px)');
+  const isPhone = () => phoneQuery.matches;
+  let size = 'half';
+  function setSize(next) {
+    size = next;
+    panel.classList.toggle('peek', next === 'peek');
+    panel.classList.toggle('full', next === 'full');
+    panel.style.height = '';
+    $('ai-size').classList.toggle('flip', next !== 'peek');
+    if (next !== 'peek') log.scrollTop = log.scrollHeight;
+  }
+  $('ai-size').onclick = () => setSize(size === 'peek' ? 'half' : size === 'half' ? 'full' : 'peek');
+
+  // Drag the grip / header up or down.
+  const head = $('ai-head');
+  let drag = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (!isPhone() || e.target.closest('button')) return;
+    drag = { y: e.clientY, h: panel.getBoundingClientRect().height, t: performance.now(), moved: false };
+    head.setPointerCapture(e.pointerId);
+    panel.classList.add('dragging');
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y;
+    if (Math.abs(dy) > 4) drag.moved = true;
+    const max = panel.parentElement.getBoundingClientRect().height - 12;
+    panel.style.height = `${Math.max(90, Math.min(max, drag.h - dy))}px`;
+  });
+  const endDrag = (e) => {
+    if (!drag) return;
+    panel.classList.remove('dragging');
+    const d = drag;
+    drag = null;
+    if (!d.moved) { setSize(size === 'peek' ? 'half' : 'peek'); return; } // a tap on the header toggles
+    const dy = e.clientY - d.y;
+    const speed = dy / Math.max(1, performance.now() - d.t); // px per ms, + = downwards
+    const total = panel.parentElement.getBoundingClientRect().height;
+    const frac = panel.getBoundingClientRect().height / total;
+    let next = frac < 0.33 ? 'peek' : frac < 0.75 ? 'half' : 'full';
+    if (speed > 0.6) next = size === 'full' ? 'half' : 'peek';
+    else if (speed < -0.6) next = size === 'peek' ? 'half' : 'full';
+    setSize(next);
+  };
+  head.addEventListener('pointerup', endDrag);
+  head.addEventListener('pointercancel', endDrag);
+
+  // While typing a question the shortcut buttons step aside, so the box and answers stay visible above the keyboard.
+  input.addEventListener('focus', () => { if (isPhone()) { panel.classList.add('typing'); if (size === 'peek') setSize('half'); } });
+  input.addEventListener('blur', () => panel.classList.remove('typing'));
+
+  // Touching the page (to write or scroll) slides the panel down out of the way.
+  $('viewport').addEventListener('pointerdown', () => {
+    if (isPhone() && !panel.hidden && size !== 'peek') { input.blur(); setSize('peek'); }
+  }, true);
   // Keep the "Sheet N" label in sync while scrolling.
   $('viewport').addEventListener('scroll', () => { if (!panel.hidden) refreshHeader(); }, { passive: true });
 
