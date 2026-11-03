@@ -159,7 +159,7 @@ const PROMPTS = {
     'and Bangla into English. Reply with only the translation.',
 };
 
-let modelCache = null;
+let modelCache = null; // models this key can use, best first
 
 async function geminiError(res) {
   let msg = `Gemini error ${res.status}`;
@@ -167,48 +167,77 @@ async function geminiError(res) {
   if (res.status === 400 && /api key/i.test(msg)) return new Error('This Gemini API key is not valid. Paste a new one in the AI panel.');
   if (res.status === 403) return new Error('This Gemini key is not allowed. Create a new key at aistudio.google.com/apikey.');
   if (res.status === 429) return new Error('The free Gemini limit is used up for now. Wait a minute (or until tomorrow) and try again.');
+  if (res.status >= 500) return new Error('Gemini is very busy right now. Please try again in a minute.');
   return new Error(msg);
 }
 
-/** Pick a fast Gemini model that this key can use (names change over time, so ask the API). */
-async function pickModel(key) {
+/** Fast Gemini models this key can use, best first (names change over time, so ask the API). */
+async function pickModels(key) {
   if (modelCache) return modelCache;
   const res = await fetch(`${GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': key } });
   if (!res.ok) throw await geminiError(res);
   const { models = [] } = await res.json();
   const names = models
     .filter((m) => (m.supportedGenerationMethods || []).includes('generateContent'))
-    .map((m) => m.name.replace(/^models\//, ''));
-  const preferred = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash'];
-  modelCache = preferred.find((p) => names.includes(p))
-    || names.find((n) => /flash/.test(n) && !/(image|tts|audio|live|lite|embedding|preview)/.test(n))
-    || names.find((n) => /gemini/.test(n));
-  if (!modelCache) throw new Error('No Gemini model is available for this key.');
+    .map((m) => m.name.replace(/^models\//, ''))
+    .filter((n) => /gemini/.test(n) && !/(image|tts|audio|live|embedding|robotics|computer)/.test(n));
+  const rank = (n) => {
+    if (n === 'gemini-flash-latest') return 0;
+    if (n === 'gemini-flash-lite-latest') return 2;
+    if (/flash/.test(n) && !/lite/.test(n)) return /preview|exp/.test(n) ? 4 : 1;
+    if (/flash-lite/.test(n)) return /preview|exp/.test(n) ? 5 : 3;
+    return /preview|exp/.test(n) ? 8 : 6; // pro and others: slower, last resort
+  };
+  modelCache = [...new Set(names)].sort((a, b) => rank(a) - rank(b) || b.localeCompare(a)).slice(0, 5);
+  if (!modelCache.length) throw new Error('No Gemini model is available for this key.');
   return modelCache;
 }
+const pickModel = async (key) => (await pickModels(key))[0];
 
 const plain = (t) => t.replace(/^#{1,6}\s+/gm, '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^\s*\*\s+/gm, '- ').trim();
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function askGemini(key, { prompt, image, history }) {
-  const model = await pickModel(key);
+/**
+ * Ask Gemini. When a model is overloaded (503) or its free quota is used up (429),
+ * wait a moment and retry, then fall back to the next model. onStatus(text) shows progress.
+ */
+async function askGemini(key, { prompt, image, history }, onStatus = () => {}) {
+  const models = await pickModels(key);
   const turns = [...history, { role: 'user', content: prompt }];
   const contents = turns.map((t, i) => ({
     role: t.role === 'assistant' ? 'model' : 'user',
     parts: i === 0 ? [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text: t.content }] : [{ text: t.content }],
   }));
-  const res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM }] },
-      contents,
-      generationConfig: { maxOutputTokens: 8192, temperature: 0.4 },
-    }),
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM }] },
+    contents,
+    generationConfig: { maxOutputTokens: 8192, temperature: 0.4 },
   });
-  if (!res.ok) {
-    if (res.status === 404) modelCache = null; // model was retired: pick again next time
-    throw await geminiError(res);
+  let res = null, lastError = null;
+  outer: for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      res = await fetch(`${GEMINI}/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
+        body,
+      });
+      if (res.ok) {
+        // Remember the model that answered so the next question starts there.
+        modelCache = [model, ...models.filter((m) => m !== model)];
+        break outer;
+      }
+      const busy = res.status >= 500;
+      const quota = res.status === 429;
+      if (res.status === 404) { modelCache = null; } // model retired: re-read the list next time
+      if (!busy && !quota && res.status !== 404) throw await geminiError(res);
+      lastError = await geminiError(res);
+      if (busy && attempt === 0) { onStatus('Gemini is busy, trying again…'); await pause(1500); continue; }
+      onStatus('Trying another Gemini model…');
+      break; // next model
+    }
+    res = null;
   }
+  if (!res) throw lastError || new Error('Gemini did not answer. Please try again.');
   const data = await res.json();
   const cand = data.candidates && data.candidates[0];
   if (!cand) {
@@ -439,7 +468,7 @@ export function initAiPanel({ getCurrent, scrollToSheet, toast }) {
     try {
       const image = await sheetPicture(sheet);
       const prompt = action === 'ask' ? question : PROMPTS[action];
-      const res = await askGemini(apiKey, { prompt, image, history });
+      const res = await askGemini(apiKey, { prompt, image, history }, (msg) => { waiting.querySelector('.ai-text').textContent = msg; });
       waiting.remove();
       const el = bubble('assistant', res.text);
       answerButtons(el, res.text, sheet);
