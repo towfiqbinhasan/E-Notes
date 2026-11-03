@@ -88,6 +88,7 @@ const DEFAULT_PREFS = {
   marginWidth: 0.4,
   fingerDraw: false,
   cursor: 'dot',
+  sheetGap: 28,
   lastNotebook: {},
 };
 const prefs = migratePrefs((() => {
@@ -126,6 +127,9 @@ export function initUI(opts) {
   const getSync = () => opts.sync; // sync starts after the UI, so always read it lazily
   const viewport = $('viewport');
   const sheetsEl = $('sheets');
+  // Space between sheets (Settings), in sheet units so it scales with zoom.
+  const applySheetGap = () => sheetsEl.style.setProperty('--sheet-gap', prefs.sheetGap);
+  applySheetGap();
   const app = $('app');
   const views = new Map();       // sheet id -> SheetView
   let userZoom = 1;              // 1 = sheet fits the window width
@@ -745,6 +749,8 @@ export function initUI(opts) {
     $('set-paper-pdf').value = prefs.paperPdf;
     $('set-cursor').value = prefs.cursor;
     $('set-theme').value = prefs.theme;
+    $('set-gap').value = prefs.sheetGap;
+    $('set-gap-label').textContent = prefs.sheetGap;
     const where = isElectron ? 'Desktop' : isNative ? 'Android' : 'Web';
     $('settings-about').textContent = `Version ${__APP_VERSION__} · ${where}`;
     $('settings-dialog').showModal();
@@ -763,6 +769,12 @@ export function initUI(opts) {
   $('set-paper-blank').onchange = (e) => { prefs.paperBlank = e.target.value; savePrefs(); };
   $('set-paper-pdf').onchange = (e) => { prefs.paperPdf = e.target.value; savePrefs(); };
   $('set-theme').onchange = (e) => { prefs.theme = e.target.value; savePrefs(); applyTheme(); };
+  $('set-gap').oninput = (e) => {
+    prefs.sheetGap = Number(e.target.value);
+    $('set-gap-label').textContent = prefs.sheetGap;
+    applySheetGap();
+    savePrefs();
+  };
   $('btn-settings').onclick = openSettings;
   $('btn-theme').onclick = () => {
     prefs.theme = resolvedTheme() === 'dark' ? 'light' : 'dark';

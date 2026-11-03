@@ -290,7 +290,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
 .popup.cursor-menu button { padding-left: 28px; }
 .sheets {
   display: flex; flex-direction: column; align-items: center;
-  gap: calc(var(--z, 1) * 28px);
+  gap: calc(var(--z, 1) * var(--sheet-gap, 28) * 1px);   /* adjustable in Settings */
   padding: calc(var(--z, 1) * 28px) 16px calc(var(--z, 1) * 28px + 90px);
   width: max-content; min-width: 100%;
 }
