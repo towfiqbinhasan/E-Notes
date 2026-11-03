@@ -5,7 +5,7 @@ import { openUserDb, getLastUser, setLastUser, clearLastUser } from './db.js';
 import { loadAll } from './store.js';
 import { startSync } from './sync.js';
 import { initUI, applyTheme, toast } from './ui.js';
-import { isWeb, oauthRedirectUrl, openExternal, onDeepLink } from './platform.js';
+import { isWeb, isAndroid, oauthRedirectUrl, openExternal, onDeepLink } from './platform.js';
 
 const $ = (id) => document.getElementById(id);
 const LOCAL_USER = { id: 'local', email: '' };
@@ -236,6 +236,7 @@ async function startApp(user, { localMode = false, offlineOnly = false } = {}) {
   $('splash').hidden = true;
   $('login').hidden = true;
   $('app').hidden = false;
+  checkAndroidUpdate();
 
   let sync = null;
   let ui = null;
@@ -281,6 +282,30 @@ async function startApp(user, { localMode = false, offlineOnly = false } = {}) {
   supabase.auth.onAuthStateChange((event) => {
     if (event === 'SIGNED_OUT') location.reload();
   });
+}
+
+// ---------------- Android updates ----------------
+
+// Desktop updates itself; the Android app can't, so tell the user when a newer APK exists.
+// (Devices on different versions may not understand each other's data, e.g. large PDFs.)
+async function checkAndroidUpdate() {
+  if (!isAndroid || !navigator.onLine) return;
+  try {
+    const res = await fetch('https://api.github.com/repos/towfiqbinhasan/E-Notes/releases/latest');
+    if (!res.ok) return;
+    const rel = await res.json();
+    const newer = (a, b) => {
+      const x = a.split('.').map(Number), y = b.split('.').map(Number);
+      for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+      return false;
+    };
+    const latest = String(rel.tag_name || '').replace(/^v/, '');
+    if (!latest || !newer(latest, __APP_VERSION__)) return;
+    const apk = (rel.assets || []).find((a) => a.name.endsWith('.apk'));
+    const el = toast(`E-Notes ${latest} is available. Tap here to update.`, { ms: 15000 });
+    el.classList.add('action');
+    el.onclick = () => { el.remove(); openExternal(apk ? apk.browser_download_url : rel.html_url); };
+  } catch { /* offline or GitHub unreachable: try next time */ }
 }
 
 // ---------------- PWA ----------------

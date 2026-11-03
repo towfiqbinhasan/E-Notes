@@ -483,6 +483,7 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 5px; font-si
   box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.4); animation: toast-in 0.3s var(--spring);
 }
 .toast.error { background: var(--danger); }
+.toast.action { pointer-events: auto; cursor: pointer; background: var(--accent, #4f6bff); }
 
 /* ---------- pen presets (dot + ▾) ---------- */
 .presets { gap: 3px; padding: 0 6px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }

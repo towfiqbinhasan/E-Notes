@@ -75,16 +75,32 @@ export async function getPdfBytes(path) {
   const rec = await db.get('pdfs', hash);
   if (rec) return new Uint8Array(await rec.blob.arrayBuffer());
   if (!downloader || !navigator.onLine) throw new Error('PDF not downloaded yet (offline)');
-  const blob = await downloader(path);
-  await db.put('pdfs', { hash, name: path, blob }, hash);
+  // Every page of a PDF asks at once: download the file only once and share it.
+  if (!downloads.has(hash)) {
+    const p = downloader(path).then(async (blob) => {
+      await db.put('pdfs', { hash, name: path, blob }, hash);
+      return blob;
+    });
+    downloads.set(hash, p);
+    p.finally(() => downloads.delete(hash)).catch(() => {});
+  }
+  const blob = await downloads.get(hash);
   return new Uint8Array(await blob.arrayBuffer());
 }
+const downloads = new Map(); // hash -> Promise<Blob> while downloading
 
 export async function getDoc(path) {
   const hash = hashFromPath(path);
   if (docs.has(hash)) return docs.get(hash);
-  return loadDoc(hash, await getPdfBytes(path));
+  // Pages shown together share one read of the file (a big PDF is costly to copy).
+  if (!opening.has(hash)) {
+    const p = getPdfBytes(path).then((bytes) => loadDoc(hash, bytes));
+    opening.set(hash, p);
+    p.finally(() => opening.delete(hash)).catch(() => {});
+  }
+  return opening.get(hash);
 }
+const opening = new Map(); // hash -> Promise<PDFDocumentProxy> while reading the file
 
 /** The printed text of one PDF page (empty for scanned pages without a text layer). */
 export async function getPageText(path, pageNum) {
